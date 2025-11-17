@@ -1,4 +1,4 @@
 # 3D Image Reconstruction
 
 ## Relavant Links
-- Project Proposal: https://github.com/EH67/3D-Image-Reconstruction-15618-Project/blob/main/15_418_Project_Proposal.pdf
+- Project Proposal: https://github.com/EH67/3D-Image-Reconstruction-15618-Project/blob/main/Project_Proposal.md
