@@ -32,4 +32,6 @@ We will be running our CUDA implementation on the GHC machines. We plan to read 
 We chose to use the GHC machines as this project relies on many embarrassingly parallel operations, which GPUs are designed to be efficient at doing. There is not much communication between threads that would nessecitate CPU like processers.
 
 ## Schedule
-1.  11/17-11/23: Design and implement a serial version of the pipeline that can take in sets of images and output a 3D reconstruction of the image. Additionn
+1.  11/17-11/23: Design and implement a serial version of the pipeline that can take in sets of images and output a 3D reconstruction of the image. Additionally, we will implement a program to take the reconstruction and render it.
+2. 11/24-11/30: Implement a working GPU implementation that successfully reconstructs the 3D points, comparing output to the serial version for correctness.
+3. 12/1-12/8: Optimize the GPU implementation to compute 3D points faster. Work on implementing "hope to achieve" goals like computing points from a video or computing points in real time.
