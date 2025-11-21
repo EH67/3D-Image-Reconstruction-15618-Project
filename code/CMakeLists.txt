@@ -24,7 +24,7 @@ set(Python_EXECUTABLE "${VENV_PYTHON_ABS}")
 set(Python3_EXECUTABLE "${VENV_PYTHON_ABS}")
 
 # --------------------------------------------------------------------------------------
-# 3. DEPENDENCY FINDING for Python (numpy & pybind11)
+# 3. DEPENDENCY FINDING for Python (numpy & pybind11 & opencv)
 # --------------------------------------------------------------------------------------
 # Find Python and NumPy (sets Python3::NumPy properties)
 find_package(Python3 COMPONENTS Interpreter Development NumPy REQUIRED)
@@ -60,10 +60,12 @@ target_link_libraries(cuda_ops_module
     Python3::NumPy 
     pybind11::module
     cudart_static # Link against the CUDA Runtime library
+    # ${OpenCV_LIBS}
 )
 
 # Specify the dir of where to find the pybind11::module.
 target_link_directories(cuda_ops_module
     PRIVATE
     ${pybind11_LIBRARY_DIRS}
+    # ${OpenCV_INCLUDE_DIRS}
 )
