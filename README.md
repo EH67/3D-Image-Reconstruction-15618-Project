@@ -18,7 +18,7 @@ Run the next few commands in order:
 2. Create a python virtualenv in /code/venv/
     - `python3 -m venv venv`
 3. Install necessary packages in the venv.
-    - `./venv/bin/pip3 install pybind11 numpy`
+    - `./venv/bin/pip3 install pybind11 numpy opencv-python scipy`
 
 ### Create build dir & run CMake
 This step only needs to be done once (unless the CMake is edited, then delete the build dir and repeat all the steps again).
