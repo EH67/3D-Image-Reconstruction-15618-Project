@@ -13,6 +13,8 @@ sys.path.insert(0, build_dir) # add path with /build to sys path.
 # Import any modules defined by PYBIND11_MODULE from src/bindings.cpp.
 import cuda_ops_module 
 
+MIN_SAMPLE_SIZE = 8
+
 def _singularize(F):
     U, S, V = np.linalg.svd(F)
     S[-1] = 0
@@ -228,62 +230,63 @@ def compute_symmetric_epipolar_distance(F, hpts1, hpts2):
 
 #newer version of finding epipolar correspondences that uses SIFT and FLAAN to be faster.
 def get_correspondences(img1, img2, M):
-  #feature matching
-  sift = cv2.SIFT_create()
+    #feature matching
+    sift = cv2.SIFT_create()
 
-  kp1, des1 = sift.detectAndCompute(img1, None)
-  kp2, des2 = sift.detectAndCompute(img2, None)
+    kp1, des1 = sift.detectAndCompute(img1, None)
+    kp2, des2 = sift.detectAndCompute(img2, None)
 
-  FLANN_INDEX_KDTREE = 1
-  index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
-  search_params = dict(checks=50)
+    FLANN_INDEX_KDTREE = 1
+    index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
+    search_params = dict(checks=50)
 
-  #knn matching using FLANN
-  flann = cv2.FlannBasedMatcher(index_params, search_params)
-  matches = flann.knnMatch(des1, des2, k=2)
+    #knn matching using FLANN
+    flann = cv2.FlannBasedMatcher(index_params, search_params)
+    matches = flann.knnMatch(des1, des2, k=2)
 
-  good_matches = []
-  pts1_candidates = []
-  pts2_candidates = []
+    good_matches = []
+    pts1_candidates = []
+    pts2_candidates = []
 
-  #ratio testing: ensuring best point is significantly different from second best
-  for m, n in matches:
-      if m.distance < 0.8 * n.distance:
-          good_matches.append(m)
+    #ratio testing: ensuring best point is significantly different from second best
+    for m, n in matches:
+        if m.distance < 0.8 * n.distance:
+            good_matches.append(m)
 
-          pts1_candidates.append(kp1[m.queryIdx].pt)
-          pts2_candidates.append(kp2[m.trainIdx].pt)
+            pts1_candidates.append(kp1[m.queryIdx].pt)
+            pts2_candidates.append(kp2[m.trainIdx].pt)
 
-  pts1_candidates = np.float32(pts1_candidates)
-  pts2_candidates = np.float32(pts2_candidates)
+    pts1_candidates = np.float32(pts1_candidates)
+    pts2_candidates = np.float32(pts2_candidates)
 
-  print(f"Found {len(pts1_candidates)} raw matches after Ratio Test.")
-  if len(pts1_candidates) < 8:
+    print(f"Found {len(pts1_candidates)} raw matches after Ratio Test.")
+    if len(pts1_candidates) < 8:
         print("Not enough matches to compute fundamental matrix Using 8 point algorithm.")
         return None, None, None
 
   #ransac
-  F, mask = cv2.findFundamentalMat(pts1_candidates, pts2_candidates, cv2.FM_RANSAC, 3.0, 0.99)
-  F_2 = eightpoint(pts1_candidates, pts2_candidates, M)
-  print("F", F.shape)
-  print(F)
-  print("F_2", F_2.shape)
-  print(F_2)
+    F, mask = cv2.findFundamentalMat(pts1_candidates, pts2_candidates, cv2.FM_RANSAC, 3.0, 0.99)
+    F_2, mask_2 = ransac_fundamental_matrix(pts1_candidates, pts2_candidates, M, 10000, 3.0)
+    print("F", F.shape)
+    print(F)
+    print("F_2", F_2.shape)
+    print(F_2)
 
 
-  #only use inliers
-  pts1 = pts1_candidates[mask.ravel() == 1]
-  pts2 = pts2_candidates[mask.ravel() == 1]
+    #only use inliers
+    pts1 = pts1_candidates[mask_2 == 1]
+    pts2 = pts2_candidates[mask_2 == 1]
+    print("pts1.shape", pts1.shape, "pts2.shape", pts2.shape, "mask_2.shape", mask_2.shape)
 
-  inlier_matches_vis = []
-  mask_flat = mask.ravel()
-  for i, match in enumerate(good_matches):
-      if mask_flat[i]:
-          inlier_matches_vis.append(match)
+    inlier_matches_vis_new = []
+    for i, match in enumerate(good_matches):
+        if mask_2[i]:
+            inlier_matches_vis_new.append(match)
 
-  # visualize_inliers(im1, kp1, im2, kp2, inlier_matches_vis)
+    # visualize_inliers(im1, kp1, im2, kp2, inlier_matches_vis)
 
-  return pts1, pts2, F
+    #   return pts1, pts2, F
+    return pts1, pts2, F_2
 
 if __name__=='__main__':
   IMAGE_DIR = os.path.abspath(os.path.join(current_dir, 'images'))
