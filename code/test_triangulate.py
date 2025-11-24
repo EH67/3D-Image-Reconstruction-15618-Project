@@ -7,13 +7,19 @@ import time
 
 # --- Setup for loading the compiled CUDA module ---
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
+# current_dir = os.path.dirname(os.path.abspath(__file__))
 
-# FIX: Add the current directory (where main.py and cuda_triangulation_module.so now reside) 
-# to sys.path directly. This is the most reliable way given your build location.
-if current_dir not in sys.path:
-    sys.path.insert(0, current_dir)
-    print(f"Adding current directory to sys.path: {current_dir}")
+# # FIX: Add the current directory (where main.py and cuda_triangulation_module.so now reside) 
+# # to sys.path directly. This is the most reliable way given your build location.
+# if current_dir not in sys.path:
+#     sys.path.insert(0, current_dir)
+#     print(f"Adding current directory to sys.path: {current_dir}")
+
+# Below code are needed in order to load the cuda modules we wrote/compiled (stored in /build).
+current_dir = os.path.dirname(os.path.abspath(__file__))
+build_dir = os.path.join(current_dir, 'build') # add /build to current abs path.
+sys.path.insert(0, build_dir) # add path with /build to sys path.
+
 
 # Import the Pybind11 module defined by PYBIND11_MODULE
 try:

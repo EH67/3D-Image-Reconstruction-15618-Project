@@ -54,8 +54,36 @@ pybind11_add_module(cuda_ops_module
     src/cuda_ops.cu
 )
 
+pybind11_add_module(cuda_triangulation_module
+    src/bindings_triangulate.cpp
+    src/triangulate.cu
+    src/triangulate.cuh
+)
+
+pybind11_add_module(cuda_ransac_module
+    src/bindings_ransac.cpp
+    src/ransac.cu
+    src/ransac.cuh
+)
+
 # Link necessary libraries.
 target_link_libraries(cuda_ops_module 
+    PRIVATE 
+    Python3::NumPy 
+    pybind11::module
+    cudart_static # Link against the CUDA Runtime library
+    # ${OpenCV_LIBS}
+)
+
+target_link_libraries(cuda_triangulation_module 
+    PRIVATE 
+    Python3::NumPy 
+    pybind11::module
+    cudart_static # Link against the CUDA Runtime library
+    # ${OpenCV_LIBS}
+)
+
+target_link_libraries(cuda_ransac_module 
     PRIVATE 
     Python3::NumPy 
     pybind11::module
@@ -67,5 +95,12 @@ target_link_libraries(cuda_ops_module
 target_link_directories(cuda_ops_module
     PRIVATE
     ${pybind11_LIBRARY_DIRS}
-    # ${OpenCV_INCLUDE_DIRS}
+)
+target_link_directories(cuda_triangulation_module
+    PRIVATE
+    ${pybind11_LIBRARY_DIRS}
+)
+target_link_directories(cuda_ransac_module
+    PRIVATE
+    ${pybind11_LIBRARY_DIRS}
 )
