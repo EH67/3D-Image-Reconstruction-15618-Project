@@ -24,6 +24,12 @@ __global__ void kernel_compute_symmetric_epipolar_dist(const float* F_dev, const
   }
   __syncthreads();
   printf("After cooperative loading\n");
+  if (idx == 0) {
+    for (int i = 0 ; i < 9 ; i++) {
+      printf("%f ", s_F[i]);
+    }
+  }
+  __syncthreads();
 
   if (idx < N) {
      // Get the point for image 1 and 2 this thread is in charge of.
@@ -73,7 +79,7 @@ void cuda_compute_symmetric_epipolar_dist(const std::vector<float>& F,
   cudaMalloc((void**)&F_dev, 9 * sizeof(float));
   cudaMalloc((void**)&hpts1_dev, hpts_size);
   cudaMalloc((void**)&hpts2_dev, hpts_size);
-  cudaMalloc((void**)&output, output_size);
+  cudaMalloc((void**)&output_dev, output_size);
 
   // Copy data from Host to Device.
   cudaMemcpy(F_dev, F.data(), F_size, cudaMemcpyHostToDevice);
