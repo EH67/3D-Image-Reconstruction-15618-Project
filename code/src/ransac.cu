@@ -18,12 +18,10 @@ __global__ void kernel_compute_symmetric_epipolar_dist(const float* F_dev, const
 
   // Cooperatively load fundamental matrix into shared memory.
   __shared__ float s_F[9];
-  printf("After declaring shared mem for fundamental matrix\n");
   if (threadIdx.x < 9) {
     s_F[threadIdx.x] = F_dev[threadIdx.x];
   }
   __syncthreads();
-  printf("After cooperative loading\n");
   if (idx == 0) {
     for (int i = 0 ; i < 9 ; i++) {
       printf("%f ", s_F[i]);
@@ -90,11 +88,12 @@ void cuda_compute_symmetric_epipolar_dist(const std::vector<float>& F,
   // 1 thread = 1 homogeneous point pair btwn the two images.
   int threadsPerBlock = 256;
   int numBlocks = (num_points + threadsPerBlock - 1) / threadsPerBlock;
-  printf("About to call kernel func for epipolar dist\n");
   kernel_compute_symmetric_epipolar_dist<<<numBlocks, threadsPerBlock, sizeof(float) * 9>>>(F_dev, hpts1_dev, hpts2_dev, output_dev, num_points);
 
+  cudaDeviceSynchronize();
 
   // Copy result from Device to Host.
+  output.resize(num_points);
   cudaMemcpy(output.data(), output_dev, output_size, cudaMemcpyDeviceToHost);
                                             
 }

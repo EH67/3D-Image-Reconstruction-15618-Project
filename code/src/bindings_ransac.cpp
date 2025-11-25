@@ -45,17 +45,15 @@ py::array_t<float> py_cuda_compute_symmetric_epipolar_dist(
       std::vector<float> F_vec(F.data(), F.data() + F.size());
       std::vector<float> hpts1_vec(hpts1.data(), hpts1.data() + hpts1.size());
       std::vector<float> hpts2_vec(hpts2.data(), hpts2.data() + hpts2.size());
-      std::vector<float> output_vec;
+      std::vector<float> output_vec(output_size);
 
       // Call wrapper to CUDA function.
-      printf("About to call cuda_compute_symmetric_epipolar_dist\n");
       cuda_compute_symmetric_epipolar_dist(F_vec, hpts1_vec, hpts2_vec, output_vec);
-
 
       // Convert output vector to a numpy array to be returned.
       py::array_t<float> output_numpy(
         std::vector<size_t>{output_size}, // shape = (output_size,)
-        output_vec
+        output_vec.data()
       );
 
       return output_numpy;

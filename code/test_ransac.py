@@ -77,7 +77,7 @@ try:
     print(f"Mean Absolute Difference (MAD) between CPU and GPU: {mad:.8f}")
     
     # Display a sample for inspection
-    sample_indices = [0, 1000, N_points - 1]
+    sample_indices = [0, 1,2,3,1000, N_points - 1]
     print("\nSample Error Values:")
     for i in sample_indices:
         print(f"Index {i:6d} | CPU: {errors_cpu[i]:.8f} | GPU: {errors_gpu[i]:.8f} | Diff: {(errors_gpu[i] - errors_cpu[i]):.8e}")
