@@ -1,243 +1,181 @@
 #include "triangulate.cuh"
 #include <cuda_runtime.h>
 #include <cusolverDn.h>
-#include <cmath>
-#include <iostream>
+#include <vector>
+#include <cstdio>
+#include <algorithm> // For std::min
 
-// Helper macro for checking CUDA error codes
-#define CUDA_CHECK(call)                                                          \
-    do {                                                                          \
-        cudaError_t err = call;                                                   \
-        if (err != cudaSuccess) {                                                 \
-            fprintf(stderr, "CUDA error at %s:%d: %s\n",                          \
-                    __FILE__, __LINE__, cudaGetErrorString(err));                 \
-            exit(EXIT_FAILURE);                                                   \
-        }                                                                         \
+#define CUDA_CHECK(call) \
+    do { \
+        cudaError_t err = call; \
+        if (err != cudaSuccess) { \
+            fprintf(stderr, "CUDA Error at line %d: %s\n", __LINE__, cudaGetErrorString(err)); \
+            exit(EXIT_FAILURE); \
+        } \
     } while (0)
 
-// Helper macro for checking cuSOLVER error codes
-#define CUSOLVER_CHECK(call)                                                      \
-    do {                                                                          \
-        cusolverStatus_t status = call;                                           \
-        if (status != CUSOLVER_STATUS_SUCCESS) {                                  \
-            fprintf(stderr, "CuSOLVER error at %s:%d: status %d\n",               \
-                    __FILE__, __LINE__, status);                                  \
-            exit(EXIT_FAILURE);                                                   \
-        }                                                                         \
+// Updated to print the specific error code
+#define CUSOLVER_CHECK(call) \
+    do { \
+        cusolverStatus_t status = call; \
+        if (status != CUSOLVER_STATUS_SUCCESS) { \
+            fprintf(stderr, "CUSOLVER Error at line %d: Status %d\n", __LINE__, status); \
+            exit(EXIT_FAILURE); \
+        } \
     } while (0)
 
 
-//preprocessing function to build A matrices
+//preprocessing function ot build A's for svd call
 __global__ void build_A_matrix_kernel(
-    const float *C1_d,      // 3x4
-    const float *pts1_d,    // N x 2
-    const float *C2_d,      // 3x4
-    const float *pts2_d,    // N x 2
-    float *A_batch_d,       // N * 16 (Output batched A matrices)
-    int N
+    const float *C1_d, const float *pts1_d,
+    const float *C2_d, const float *pts2_d,
+    float *A_batch_d, int N
 ) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= N) return;
+    
+    // Pointer to the start of the current 4x4 matrix A_i
+    float *A = A_batch_d + i * 16;
+    
+    float u1 = pts1_d[i*2];
+    float v1 = pts1_d[i*2+1];
 
-    if (i < N) {
-        // Pointer to the start of the current 4x4 matrix A_i
-        float *A = A_batch_d + i * 16; 
-        
-        float u1 = pts1_d[i * 2 + 0];
-        float v1 = pts1_d[i * 2 + 1];
-        float u2 = pts2_d[i * 2 + 0];
-        float v2 = pts2_d[i * 2 + 1];
-
-        // C matrices are 3x4
-        const float *C1_row0 = C1_d + 0 * 4;
-        const float *C1_row1 = C1_d + 1 * 4;
-        const float *C1_row2 = C1_d + 2 * 4;
-        
-        const float *C2_row0 = C2_d + 0 * 4;
-        const float *C2_row1 = C2_d + 1 * 4;
-        const float *C2_row2 = C2_d + 2 * 4;
-
-        // A is stored in row-major order in the kernel.
-        for (int j = 0; j < 4; j++) {
-            A[0 * 4 + j] = u1 * C1_row2[j] - C1_row0[j];
-            A[1 * 4 + j] = v1 * C1_row2[j] - C1_row1[j];
-            A[2 * 4 + j] = u2 * C2_row2[j] - C2_row0[j];
-            A[3 * 4 + j] = v2 * C2_row2[j] - C2_row1[j];
-        }
+    float u2 = pts2_d[i*2];
+    float v2 = pts2_d[i*2+1];
+    
+    // Row-major construction
+    for (int j = 0; j < 4; j++) {
+        A[j*4+0] = u1*C1_d[2*4+j] - C1_d[0*4+j];
+        A[j*4+1] = v1*C1_d[2*4+j] - C1_d[1*4+j];
+        A[j*4+2] = u2*C2_d[2*4+j] - C2_d[0*4+j];
+        A[j*4+3] = v2*C2_d[2*4+j] - C2_d[1*4+j];
     }
 }
 
-
-//Postprocessing function to get P points
+//postprocessing function to compute final 3d points
 __global__ void extract_P_kernel(
-    const float *V_batch_d, // N * 16 (Batched V matrices from SVD)
-    float *P_d,             // N * 3 (Output 3D points)
-    int N                   // Batch size
+    const float *V_batch_d, float *P_d, int N
 ) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (i < N) {
-        // Pointer to the current 4x4 V matrix
-        const float *V = V_batch_d + i * 16;
-        
-        // cuSOLVER returns V in column-major order
-        // The null vector is the last column of V.
-        // P_homo[0] = V[3] 
-        // P_homo[1] = V[7]
-        // P_homo[2] = V[11]
-        // P_homo[3] = V[15]
-        
-        float P_homo_W = V[15];
-        
-        if (fabs(P_homo_W) > 1e-6) {
-            float inv_W = 1.0f / P_homo_W;
-            
-            // X = X/W, Y = Y/W, Z = Z/W
-            P_d[i * 3 + 0] = V[3] * inv_W;   // X / W
-            P_d[i * 3 + 1] = V[7] * inv_W;   // Y / W
-            P_d[i * 3 + 2] = V[11] * inv_W;  // Z / W
-        } else {
-            // Cannot normalize (point at infinity or numerical error)
-            P_d[i * 3 + 0] = 0.0f;
-            P_d[i * 3 + 1] = 0.0f;
-            P_d[i * 3 + 2] = 0.0f;
-        }
+    if (i >= N) return;
+    
+    const float *V = V_batch_d + i * 16;
+    float W = V[15]; // Last element (index 15)
+    
+    if (fabs(W) > 1e-8f) {
+        float inv_W = 1.0f / W;
+        P_d[i*3+0] = V[12] * inv_W;
+        P_d[i*3+1] = V[13] * inv_W;
+        P_d[i*3+2] = V[14] * inv_W;
+    } else {
+        P_d[i*3+0] = 0.0f;
+        P_d[i*3+1] = 0.0f;
+        P_d[i*3+2] = 0.0f;
     }
 }
 
-
-//Host Side triangulate function
-float cuda_triangulate(
-    const std::vector<float>& C1,
-    const std::vector<float>& pts1,
-    const std::vector<float>& C2,
-    const std::vector<float>& pts2,
-    std::vector<float>& P_out
+std::vector<float> cuda_triangulate(
+    const std::vector<float>& C1, const std::vector<float>& pts1,
+    const std::vector<float>& C2, const std::vector<float>& pts2
 ) {
-    //variable setup for Preprocessing, SVD, and Postprocessing
-    int N = pts1.size() / 2; 
-    const int M = 4;    // Height of A
-    const int K = 4;    // Width of A
-    const int rank = 4; // 4 Singular vectors
-    const int LDA = M;  // Leading dimension of A = M = 4
-    const int LDU = M;  // Leading dimension of U = M = 4
-    const int LDV = K;  // Leading dimension of V = Non-Leading of A = K = 4
-    const long long int strideA = M * K; // Stride is 16 elements since A is 4x4
-    
-    // Total device memory needed for N batches of 4x4 matrices
-    size_t batch_size_bytes = (size_t)N * strideA * sizeof(float); 
-    size_t pts_size_bytes = pts1.size() * sizeof(float);
-    size_t C_size_bytes = C1.size() * sizeof(float);
-    size_t P_out_size_bytes = (size_t)N * 3 * sizeof(float);
-    
-    // Device pointers
-    float *C1_d, *pts1_d, *C2_d, *pts2_d;
-    float *A_batch_d = nullptr; // Input matrices A
-    float *S_batch_d = nullptr; // Output S 
-    float *V_batch_d = nullptr; // Output V matrices
-    float *d_work = nullptr;    // CuSOLVER work buffer
-    int *info_d = nullptr;      // CuSOLVER status info
-    float *U_batch_d = nullptr; // U is required to be allocated for the function call
-    
-    // Host pointer for the Frobenius norm residual 
-    double h_R_nrmF = 0.0;
+    int N = pts1.size() / 2;
+    if (N == 0) return std::vector<float>();
 
-    // CuSOLVER handle
-    cusolverDnHandle_t cusolverH = nullptr;
-    int lwork = 0; // The size of the workspace, queried first
-    
-    //allocations
-    CUDA_CHECK(cudaSetDevice(0));
-    
-    CUDA_CHECK(cudaMalloc((void**)&C1_d, C_size_bytes));
-    CUDA_CHECK(cudaMemcpy(C1_d, C1.data(), C_size_bytes, cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMalloc((void**)&C2_d, C_size_bytes));
-    CUDA_CHECK(cudaMemcpy(C2_d, C2.data(), C_size_bytes, cudaMemcpyHostToDevice));
-    
-    CUDA_CHECK(cudaMalloc((void**)&pts1_d, pts_size_bytes));
-    CUDA_CHECK(cudaMemcpy(pts1_d, pts1.data(), pts_size_bytes, cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMalloc((void**)&pts2_d, pts_size_bytes));
-    CUDA_CHECK(cudaMemcpy(pts2_d, pts2.data(), pts_size_bytes, cudaMemcpyHostToDevice));
+    float *C1_d, *C2_d, *pts1_d, *pts2_d, *A_d, *V_d, *U_d, *S_d, *P_d, *work;
+    int *info;
 
-    CUDA_CHECK(cudaMalloc((void**)&A_batch_d, batch_size_bytes));
-    CUDA_CHECK(cudaMalloc((void**)&V_batch_d, batch_size_bytes)); 
-    CUDA_CHECK(cudaMalloc((void**)&S_batch_d, (size_t)N * K * sizeof(float))); 
-    CUDA_CHECK(cudaMalloc((void**)&info_d, (size_t)N * sizeof(int)));      
-    CUDA_CHECK(cudaMalloc((void**)&U_batch_d, batch_size_bytes)); 
-
-    //build A matrices
-    int threadsPerBlock = 256;
-    int numBlocks = (N + threadsPerBlock - 1) / threadsPerBlock;
+    // Allocate Global Memory
+    // We allocate all data buffers at once to avoid repeated malloc overhead.
+    // If there is too much data, this may need to be done in batches but
+    // this was tested with 1,000,000 datapoints and was fine
+    CUDA_CHECK(cudaMalloc(&C1_d, 48));
+    CUDA_CHECK(cudaMalloc(&C2_d, 48));
+    CUDA_CHECK(cudaMalloc(&pts1_d, pts1.size()*4));
+    CUDA_CHECK(cudaMalloc(&pts2_d, pts2.size()*4));
+    CUDA_CHECK(cudaMalloc(&A_d, N*64));     // 16 floats * N
+    CUDA_CHECK(cudaMalloc(&V_d, N*64));     // 16 floats * N
+    CUDA_CHECK(cudaMalloc(&U_d, N*64));     // 16 floats * N
+    CUDA_CHECK(cudaMalloc(&S_d, N*16));     // 4 floats * N
+    CUDA_CHECK(cudaMalloc(&info, N*4));     // 1 int * N
+    CUDA_CHECK(cudaMalloc(&P_d, N*12));     // 3 floats * N (output)
     
-    build_A_matrix_kernel<<<numBlocks, threadsPerBlock>>>(
-        C1_d, pts1_d, C2_d, pts2_d, A_batch_d, N
-    );
-    CUDA_CHECK(cudaGetLastError());
+    // Copy Inputs to device
+    CUDA_CHECK(cudaMemcpy(C1_d, C1.data(), 48, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(C2_d, C2.data(), 48, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(pts1_d, pts1.data(), pts1.size()*4, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(pts2_d, pts2.data(), pts2.size()*4, cudaMemcpyHostToDevice));
+    
+    //build A matrix kernal
+    int blocks = (N + 255) / 256;
+    build_A_matrix_kernel<<<blocks, 256>>>(C1_d, pts1_d, C2_d, pts2_d, A_d, N);
     CUDA_CHECK(cudaDeviceSynchronize());
-
-    //SVD
-    CUSOLVER_CHECK(cusolverDnCreate(&cusolverH));
     
-    //helper function from cuSOLVER to compute the needed buffer size, saves in lwork
-    //arguments are identical to cusolverDnSgesvdaStridedBatched
+    //setup cuSOLVER
+    cusolverDnHandle_t handle;
+    CUSOLVER_CHECK(cusolverDnCreate(&handle));
+    
+    //Batching to prevent segfaulting and other wierd behavior
+    const int BATCH_SIZE = 200000; 
+    int lwork = 0;
+    
     CUSOLVER_CHECK(cusolverDnSgesvdaStridedBatched_bufferSize(
-        cusolverH, CUSOLVER_EIG_MODE_VECTOR, rank, 
-        M, K, A_batch_d, LDA, strideA, S_batch_d, 
-        strideA, U_batch_d, LDU, strideA, V_batch_d, LDV, strideA, &lwork, N
-    ));
-
-    // Allocate the necessary workspace on the device (size is lwork)
-    CUDA_CHECK(cudaMalloc((void**)&d_work, (size_t)lwork * sizeof(float)));
-
-    // Perform the StridedBatched SVD: A = U * S * V^T
-    CUSOLVER_CHECK(cusolverDnSgesvdaStridedBatched(
-        cusolverH, 
-        CUSOLVER_EIG_MODE_VECTOR,   // jobz: Compute all vectors (U and V)
-        rank,                       // rank: Number of singular values/vectors to compute (4)
-        M, K,                       // M=4, N=4 (Rows/Columns)
-        A_batch_d, LDA, strideA,    // A data pointer, LDA, stride
-        S_batch_d, strideA,         // S data pointer, stride
-        U_batch_d, LDU, strideA,    // U data pointer, LDU, stride
-        V_batch_d, LDV, strideA,    // V data pointer, LDV, stride
-        d_work, lwork,              // Workspace and size, computed already
-        info_d, 
-        &h_R_nrmF,                  // Host residual norm (double pointer)
-        N                           // Batch size N
+        handle, 
+        CUSOLVER_EIG_MODE_VECTOR, 
+        4, 4, 4,               // rank, m, n
+        A_d, 4, 16LL,          // stride parameters (dummy ptrs ok for size check)
+        S_d, 4LL, 
+        U_d, 4, 16LL, 
+        V_d, 4, 16LL, 
+        &lwork, 
+        BATCH_SIZE             // Query size for the MAX usable batch size
     ));
     
+    CUDA_CHECK(cudaMalloc(&work, lwork * sizeof(float)));
+
+    //execute in batches to prevent stack smashing and OOM issues
+    for (int offset = 0; offset < N; offset += BATCH_SIZE) {
+        int current_batch = std::min(BATCH_SIZE, N - offset);
+        
+        //pointer arithmetic
+        float *A_curr = A_d + (offset * 16);
+        float *S_curr = S_d + (offset * 4);
+        float *U_curr = U_d + (offset * 16);
+        float *V_curr = V_d + (offset * 16);
+        int   *info_curr = info + offset;
+
+        CUSOLVER_CHECK(cusolverDnSgesvdaStridedBatched(
+            handle, 
+            CUSOLVER_EIG_MODE_VECTOR, 
+            4, 4, 4, 
+            A_curr, 4, 16LL, 
+            S_curr, 4LL, 
+            U_curr, 4, 16LL, 
+            V_curr, 4, 16LL, 
+            work, lwork, 
+            info_curr, 
+            nullptr, // rn_out is null
+            current_batch
+        ));
+    }
     CUDA_CHECK(cudaDeviceSynchronize());
-
-    //free up space cus line 222 has a memory issue
-    cudaFree(C1_d);
-    cudaFree(pts1_d);
-    cudaFree(C2_d);
-    cudaFree(pts2_d);
-    cudaFree(A_batch_d);
-    cudaFree(U_batch_d);
-    cudaFree(S_batch_d);
-    cudaFree(d_work);
-    cudaFree(info_d);
-
-    //LINE 222 CURRENTLY NOT WORKING CUS OF A OOM ISSUE
-    float *P_d = nullptr;
-    CUDA_CHECK(cudaMalloc((void**)&P_d, P_out_size_bytes));
     
-    extract_P_kernel<<<numBlocks, threadsPerBlock>>>(
-        V_batch_d, P_d, N 
-    );
-    CUDA_CHECK(cudaGetLastError());
+    //get P
+    extract_P_kernel<<<blocks, 256>>>(V_d, P_d, N);
     CUDA_CHECK(cudaDeviceSynchronize());
-
-    //copy final points to host
-    P_out.resize(N * 3);
-    CUDA_CHECK(cudaMemcpy(P_out.data(), P_d, P_out_size_bytes, cudaMemcpyDeviceToHost));
     
-    //destroy the solver
-    if (cusolverH) CUSOLVER_CHECK(cusolverDnDestroy(cusolverH));
+    //copy result
+    float *host_buf;
+    CUDA_CHECK(cudaMallocHost(&host_buf, N*12));
+    CUDA_CHECK(cudaMemcpy(host_buf, P_d, N*12, cudaMemcpyDeviceToHost));
     
-    // Cleanup Remaining Device Memory
+    std::vector<float> result(host_buf, host_buf + N*3);
     
-    cudaFree(V_batch_d);
-    cudaFree(P_d);
-
-    return 0.0f; 
+    //free everything
+    cudaFreeHost(host_buf);
+    cusolverDnDestroy(handle);
+    cudaFree(C1_d); cudaFree(C2_d); cudaFree(pts1_d); cudaFree(pts2_d);
+    cudaFree(A_d); cudaFree(V_d); cudaFree(U_d); cudaFree(S_d);
+    cudaFree(info); cudaFree(work); cudaFree(P_d);
+    
+    return result;
 }
