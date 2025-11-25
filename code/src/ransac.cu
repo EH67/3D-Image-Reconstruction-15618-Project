@@ -95,5 +95,9 @@ void cuda_compute_symmetric_epipolar_dist(const std::vector<float>& F,
   // Copy result from Device to Host.
   output.resize(num_points);
   cudaMemcpy(output.data(), output_dev, output_size, cudaMemcpyDeviceToHost);
-                                            
+ 
+  cudaFree(F_dev);
+  cudaFree(hpts1_dev);
+  cudaFree(hpts2_dev);
+  cudaFree(output_dev);
 }
