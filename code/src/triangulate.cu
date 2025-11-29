@@ -1,253 +1,202 @@
 #include "triangulate.cuh"
 #include <cuda_runtime.h>
+#include <vector>
+#include <cstdio>
 #include <cmath>
-#include <iostream>
-#include <float.h>
+#include <cfloat> // For FLT_MAX
 
+#define CUDA_CHECK(call) \
+    do { \
+        cudaError_t err = call; \
+        if (err != cudaSuccess) { \
+            fprintf(stderr, "CUDA Error at line %d: %s\n", __LINE__, cudaGetErrorString(err)); \
+            exit(EXIT_FAILURE); \
+        } \
+    } while (0)
 
-//determinant of a 3x3,
-//pulled from https://www.geeksforgeeks.org/maths/determinant-of-a-matrix-formula/
-__device__ float determinant_3x3(const float *M) {
-    return M[0] * (M[4] * M[8] - M[5] * M[7]) - 
-           M[1] * (M[3] * M[8] - M[5] * M[6]) + 
-           M[2] * (M[3] * M[7] - M[4] * M[6]);
-}
+// --- device helper functions ---
 
-//find the inverse of the matrix using adjugates
-//requires the determinant to be nonzero
-__device__ float inverse_3x3(const float *M, float *Minv) {
-
-    Minv[0] = M[4] * M[8] - M[5] * M[7];
-    Minv[1] = M[2] * M[7] - M[1] * M[8];
-    Minv[2] = M[1] * M[5] - M[2] * M[4];
-    Minv[3] = M[5] * M[6] - M[3] * M[8];
-    Minv[4] = M[0] * M[8] - M[2] * M[6];
-    Minv[5] = M[2] * M[3] - M[0] * M[5];
-    Minv[6] = M[3] * M[7] - M[4] * M[6];
-    Minv[7] = M[1] * M[6] - M[0] * M[7];
-    Minv[8] = M[0] * M[4] - M[1] * M[3];
-
-    float det = M[0] * Minv[0] + M[1] * Minv[3] + M[2] * Minv[6];
-
-    if (fabs(det) > FLT_EPSILON) {
-        float invDet = 1.0f / det;
-        for (int i = 0; i < 9; i++) {
-            Minv[i] *= invDet;
-        }
-        return det;
-    } 
-    
-    // Singular matrix
-    return 0.0f;
-}
-
-__device__ void mat_vec_mult_3x3(const float *M, const float *v_in, float *v_out) {
-    for (int i = 0; i < 3; i++) {
-        float sum = 0.0f;
-        for (int j = 0; j < 3; j++) {
-            sum += M[i * 3 + j] * v_in[j];
-        }
-        v_out[i] = sum;
+//build A matrix, values stored in local registers
+__device__ void build_A_local(
+    const float *C1, const float *C2,
+    float u1, float v1, float u2, float v2,
+    float A[16]
+) {
+    // Row-major
+    for (int j = 0; j < 4; j++) {
+        A[0*4+j] = u1*C1[2*4+j] - C1[0*4+j]; // Row 0: u1*P3 - P1
+        A[1*4+j] = v1*C1[2*4+j] - C1[1*4+j]; // Row 1: v1*P3 - P2
+        A[2*4+j] = u2*C2[2*4+j] - C2[0*4+j]; // Row 2: u2*P3' - P1'
+        A[3*4+j] = v2*C2[2*4+j] - C2[1*4+j]; // Row 3: v2*P3' - P2'
     }
 }
 
-//DLT function to find the null space ofa. 4x4 matrix
-__device__ bool solve_dlt_case(const float *A_sub, float *P_out) {
-    
-    // A' is the top-left 3x3 of A_sub. b is the 4th column of A_sub.
-    float A_prime[9]; // 3x3 matrix A'
-    float b[3];       // 3x1 vector b
-    
-    //populate A' and b
-    for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < 3; j++) {
-            A_prime[i * 3 + j] = A_sub[i * 4 + j];
-        }
-        b[i] = A_sub[i * 4 + 3]; // The 4th column (corresponding to W=1)
-    }
-    
-    //invrese A'
-    float A_prime_inv[9];
-    float det = inverse_3x3(A_prime, A_prime_inv);
+// Compute SVD using One-Sided Jacobi on registers
+// A becomes (approx U*Sigma)
+// V becomes the right singular vectors
+__device__ void svd_4x4_jacobi_local(float A[16], float V[16]) {
+    // Initialize V
+    V[0]=1.0f; V[1]=0.0f; V[2]=0.0f; V[3]=0.0f;
+    V[4]=0.0f; V[5]=1.0f; V[6]=0.0f; V[7]=0.0f;
+    V[8]=0.0f; V[9]=0.0f; V[10]=1.0f; V[11]=0.0f;
+    V[12]=0.0f; V[13]=0.0f; V[14]=0.0f; V[15]=1.0f;
 
-    //if singular
-    if (fabs(det) < 1e-6f) {
-        return false;
-    }
-    
-    //X = -A_prime_inv * b
-    float neg_b[3];
-    for(int i=0; i<3; i++){
-        neg_b[i] = -b[i];
-    }
-    
-    float X[3]; 
-    mat_vec_mult_3x3(A_prime_inv, neg_b, X);
+    //4 iters works decently well for a 4x4 matrix
+    #pragma unroll
+    for (int iter = 0; iter < 4; iter++) {
+        //iterate over all pairs p and q
+        for (int p = 0; p < 3; p++) {
+            for (int q = p + 1; q < 4; q++) {
+                float a = 0.0f, b = 0.0f, d = 0.0f;
 
-    //fill P
-    P_out[0] = X[0];
-    P_out[1] = X[1];
-    P_out[2] = X[2];
-    
-    return true;
-}
+                //dot products
+                for (int i = 0; i < 4; i++) {
+                    float val_p = A[p + 4*i]; 
+                    float val_q = A[q + 4*i]; 
+                    a += val_p * val_p;
+                    b += val_q * val_q;
+                    d += val_p * val_q;
+                }
 
+                if (fabsf(d) < 1e-9f) continue; //skip if already orthogonal
 
-//solving for potential 3d points using dlt
-//initial plan uses svd but it is very involved and complex.
-__device__ bool solve_robust_dlt_triangulation(const float *A, float *P_out) {
-    
-    float P_results[4][3]; // Storage for the 4 potential 3D points
-    int success_count = 0;
-    float sum_P[3] = {0.0f, 0.0f, 0.0f};
+                //givens rotation
+                float tau = (b - a) / (2.0f * d);
+                float sign = (tau >= 0.0f) ? 1.0f : -1.0f;
+                float t = sign / (fabsf(tau) + sqrtf(1.0f + tau * tau));
+                float c = 1.0f / sqrtf(1.0f + t * t);
+                float s = c * t;
 
-    int row_indices[4][3] = {
-        {1, 2, 3}, // Drop Row 0
-        {0, 2, 3}, // Drop Row 1
-        {0, 1, 3}, // Drop Row 2
-        {0, 1, 2}  // Drop Row 3
-    };
+                //apply rotation
+                for (int i = 0; i < 4; i++) {
+                    
+                    //update A
+                    int idx_p = p + 4*i;
+                    int idx_q = q + 4*i;
+                    float Ap = A[idx_p];
+                    float Aq = A[idx_q];
+                    A[idx_p] = c * Ap - s * Aq;
+                    A[idx_q] = s * Ap + c * Aq;
 
-    // Iterate through the 4 sub-problems
-    for (int k = 0; k < 4; k++) {
-        float A_sub[12]; // 3x4 sub-matrix
-        
-        for (int r = 0; r < 3; r++) {
-            int original_row = row_indices[k][r];
-            for (int c = 0; c < 4; c++) {
-                A_sub[r * 4 + c] = A[original_row * 4 + c];
+                    //update V
+                    float Vp = V[idx_p];
+                    float Vq = V[idx_q];
+                    V[idx_p] = c * Vp - s * Vq;
+                    V[idx_q] = s * Vp + c * Vq;
+                }
             }
         }
+    }
+}
+
+// Extract P by finding the singular vector corresponding to the smallest singular value
+__device__ void extract_P_local(float A[16], float V[16], float *P_row_ptr) {
+    int min_col = 0;
+    float min_norm_sq = FLT_MAX;
+
+    //find which col has the smallest norm
+    //corresponds to the smallest singular value
+    for (int j = 0; j < 4; j++) {
+        float col_norm_sq = 0.0f;
+        for (int i = 0; i < 4; i++) {
+            float val = A[j + 4*i];
+            col_norm_sq += val * val;
+        }
         
-        if (solve_dlt_case(A_sub, P_results[k])) {
-            //add to running sum
-            sum_P[0] += P_results[k][0];
-            sum_P[1] += P_results[k][1];
-            sum_P[2] += P_results[k][2];
-            success_count++;
+        if (col_norm_sq < min_norm_sq) {
+            min_norm_sq = col_norm_sq;
+            min_col = j;
         }
     }
 
-    if (success_count > 0) {
-        // Average the solutions
-        float inv_count = 1.0f / (float)success_count;
-        P_out[0] = sum_P[0] * inv_count;
-        P_out[1] = sum_P[1] * inv_count;
-        P_out[2] = sum_P[2] * inv_count;
-        return true;
+    //get corresponding column (V is row major)
+    float X = V[min_col + 4*0];
+    float Y = V[min_col + 4*1];
+    float Z = V[min_col + 4*2];
+    float W = V[min_col + 4*3];
+
+    //perspective division
+    if (fabsf(W) > 1e-8f) {
+        float inv_W = 1.0f / W;
+        P_row_ptr[0] = X * inv_W;
+        P_row_ptr[1] = Y * inv_W;
+        P_row_ptr[2] = Z * inv_W;
+    } else {
+        P_row_ptr[0] = 0.0f;
+        P_row_ptr[1] = 0.0f;
+        P_row_ptr[2] = 0.0f;
     }
-    
-    return false; // All 4 cases failed
 }
 
-__global__ void triangulation_kernel_gpu(const float *C1_d, const float *pts1_d,// 3x4, N x 2
-                                         const float *C2_d, const float *pts2_d,// 3x4, N x 2
-                                         float *P_d,                            // N x 3
-                                         int N) {
+//--- combined kernel function ---
+__global__ void triangulate_fused_kernel(
+    const float *C1_d, const float *pts1_d,
+    const float *C2_d, const float *pts2_d,
+    float *P_d, int N
+) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= N) return;
 
-    if (i < N) {
-        float A[16]; //4x4 observation matrix
-        
-        float u1 = pts1_d[i * 2 + 0];
-        float v1 = pts1_d[i * 2 + 1];
-        float u2 = pts2_d[i * 2 + 0];
-        float v2 = pts2_d[i * 2 + 1];
+    //data stored in thread local registers which allow for high performance over cusolver
+    float A[16];
+    float V[16];
 
-        //3x4 c matrices
-        const float *C1_row0 = C1_d + 0 * 4;
-        const float *C1_row1 = C1_d + 1 * 4;
-        const float *C1_row2 = C1_d + 2 * 4;
-        
-        const float *C2_row0 = C2_d + 0 * 4;
-        const float *C2_row1 = C2_d + 1 * 4;
-        const float *C2_row2 = C2_d + 2 * 4;
+    //Load inputs
+    float u1 = pts1_d[i*2];
+    float v1 = pts1_d[i*2+1];
+    float u2 = pts2_d[i*2];
+    float v2 = pts2_d[i*2+1];
 
-        //A[0]
-        for (int j = 0; j < 4; j++) {
-            A[0 * 4 + j] = u1 * C1_row2[j] - C1_row0[j];
-        }
-        // A[1]
-        for (int j = 0; j < 4; j++) {
-            A[1 * 4 + j] = v1 * C1_row2[j] - C1_row1[j];
-        }
-        // A[2]
-        for (int j = 0; j < 4; j++) {
-            A[2 * 4 + j] = u2 * C2_row2[j] - C2_row0[j];
-        }
-        // A[3]
-        for (int j = 0; j < 4; j++) {
-            A[3 * 4 + j] = v2 * C2_row2[j] - C2_row1[j];
-        }
-        
-        //DLT for finding points
-        float P_non_homo[3];
-        bool success = solve_robust_dlt_triangulation(A, P_non_homo);
+    //build A
+    build_A_local(C1_d, C2_d, u1, v1, u2, v2, A);
 
-        if (success) {
-            P_d[i * 3 + 0] = P_non_homo[0];
-            P_d[i * 3 + 1] = P_non_homo[1];
-            P_d[i * 3 + 2] = P_non_homo[2];
-        } else {
-            //failed
-            P_d[i * 3 + 0] = 0.0f;
-            P_d[i * 3 + 1] = 0.0f;
-            P_d[i * 3 + 2] = 0.0f;
-        }
-    }
+    //compute SVD using jacobi methods
+    svd_4x4_jacobi_local(A, V);
+
+    //get P
+    extract_P_local(A, V, P_d + i*3);
 }
 
+// --- Host function ---
+std::vector<float> cuda_triangulate(
+    const std::vector<float>& C1, const std::vector<float>& pts1,
+    const std::vector<float>& C2, const std::vector<float>& pts2
+) {
+    int N = pts1.size() / 2;
+    if (N == 0) return std::vector<float>();
 
-//cpu side function to prepare and launch triangulate kernel
-float cuda_triangulate(const std::vector<float>& C1,const std::vector<float>& pts1,
-                       const std::vector<float>& C2, const std::vector<float>& pts2,
-                       std::vector<float>& P_out) {
-    int N = pts1.size() / 2; 
-    size_t pts_size = pts1.size() * sizeof(float);
-    size_t C_size = C1.size() * sizeof(float);
-    size_t P_out_size_bytes = N * 3 * sizeof(float);
-    
-    float *C1_d, *pts1_d, *C2_d, *pts2_d;
-    float *P_d;
+    float *C1_d, *C2_d, *pts1_d, *pts2_d, *P_d;
 
-    cudaSetDevice(0);
+    // Allocate Buffers
+    CUDA_CHECK(cudaMalloc(&C1_d, 48)); 
+    CUDA_CHECK(cudaMalloc(&C2_d, 48));
+    CUDA_CHECK(cudaMalloc(&pts1_d, pts1.size() * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&pts2_d, pts2.size() * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&P_d, N * 3 * sizeof(float)));
     
-    //camera1
-    cudaMalloc((void**)&C1_d, C_size);
-    cudaMemcpy(C1_d, C1.data(), C_size, cudaMemcpyHostToDevice);
-
-    //camera2
-    cudaMalloc((void**)&C2_d, C_size);
-    cudaMemcpy(C2_d, C2.data(), C_size, cudaMemcpyHostToDevice);
+    // Copy Data
+    CUDA_CHECK(cudaMemcpy(C1_d, C1.data(), 48, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(C2_d, C2.data(), 48, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(pts1_d, pts1.data(), pts1.size() * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(pts2_d, pts2.data(), pts2.size() * sizeof(float), cudaMemcpyHostToDevice));
     
-    //points1
-    cudaMalloc((void**)&pts1_d, pts_size);
-    cudaMemcpy(pts1_d, pts1.data(), pts_size, cudaMemcpyHostToDevice);
-
-    //points2
-    cudaMalloc((void**)&pts2_d, pts_size);
-    cudaMemcpy(pts2_d, pts2.data(), pts_size, cudaMemcpyHostToDevice);
+    // Launch Kernel
+    int threads = 256;
+    int blocks = (N + threads - 1) / threads;
     
-    //output 3d points
-    cudaMalloc((void**)&P_d, P_out_size_bytes);
-    cudaMemset(P_d, 0, P_out_size_bytes);
-
-    int threadsPerBlock = 256;
-    int numBlocks = (N + threadsPerBlock - 1) / threadsPerBlock;
+    // One big parallel kernel launch
+    triangulate_fused_kernel<<<blocks, threads>>>(C1_d, pts1_d, C2_d, pts2_d, P_d, N);
     
-    triangulation_kernel_gpu<<<numBlocks, threadsPerBlock>>>(C1_d, pts1_d, C2_d, pts2_d, P_d, N);
-    cudaDeviceSynchronize();
-
-    P_out.resize(N * 3);
-    cudaMemcpy(P_out.data(), P_d, P_out_size_bytes, cudaMemcpyDeviceToHost);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
     
-    //frees
-    cudaFree(C1_d);
-    cudaFree(pts1_d);
-    cudaFree(C2_d);
-    cudaFree(pts2_d);
+    // Copy Results to host
+    std::vector<float> result(N * 3);
+    CUDA_CHECK(cudaMemcpy(result.data(), P_d, N * 3 * sizeof(float), cudaMemcpyDeviceToHost));
+    
+    // Free Memory
+    cudaFree(C1_d); cudaFree(C2_d); cudaFree(pts1_d); cudaFree(pts2_d);
     cudaFree(P_d);
-
-    // Reprojection error calculation would go here if implemented.
-    return 0.0f; 
+    
+    return result;
 }
