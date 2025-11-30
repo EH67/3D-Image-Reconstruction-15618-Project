@@ -1,3 +1,16 @@
+/*
+triangulate function using the One-Sided Jacobi Method
+Idea proposed by google gemini.
+This idea was used instead of the cuSOLVER implementation as the cuSOLVER SVD 
+algorithms are very strong and robust, but are meant for very very large 
+matrices, using many global variables that slow down performance compared to a 
+CPU implementation on small inputs.
+
+citation: 
+Hestenes, M. R. (1958). "Inversion of Matrices by Biorthogonalization and Related Results." 
+Journal of the Society for Industrial and Applied Mathematics, 6(1), 51–90.
+*/ 
+
 #include "triangulate.cuh"
 #include <cuda_runtime.h>
 #include <vector>
