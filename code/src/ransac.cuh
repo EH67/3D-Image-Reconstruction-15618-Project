@@ -14,4 +14,6 @@ void cuda_compute_symmetric_epipolar_dist(const std::vector<float>& F,
                                           const std::vector<float>& hpts1,
                                           const std::vector<float>& hpts2,
                                           std::vector<float>& output);
+
+void cuda_eight_point_minimal(const std::vector<float>& pts1, const std::vector<float>&pts2, const size_t M, std::vector<float>& output_F);
                                   

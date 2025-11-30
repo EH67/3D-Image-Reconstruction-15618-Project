@@ -15,6 +15,5 @@
  * @param P_out Vector of computed 3D points
  * @return      Reprojection error (currently a placeholder 0.0f, will implement if there is time).
  */
-float cuda_triangulate(const std::vector<float>& C1, const std::vector<float>& pts1,
-                       const std::vector<float>& C2, const std::vector<float>& pts2, 
-                       std::vector<float>& P_out);
+std::vector<float> cuda_triangulate(const std::vector<float>& C1, const std::vector<float>& pts1,
+                       const std::vector<float>& C2, const std::vector<float>& pts2);

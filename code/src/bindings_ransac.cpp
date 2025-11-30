@@ -59,6 +59,44 @@ py::array_t<float> py_cuda_compute_symmetric_epipolar_dist(
       return output_numpy;
     }
 
+/**
+* @brief Python wrapper for eight point minimal algorithm (w/o nonlinear refinement at the end).
+*
+* @param pts1 Shape [8,2] for image 1
+* @param pts2 Shape [8,2] for image 2
+* @param M Max of width / height of image
+*
+* @returns a 3*3 Fundamental matrix
+*/
+py::array_t<float> py_cuda_eight_point_minimal(py::array_t<float> pts1, py::array_t<float> pts2, size_t M) {
+  // Input validation.
+  if (pts1.dtype().kind() != 'f' || pts2.dtype().kind() != 'f') {
+    throw std::runtime_error("All input arrays must be of type float32 (np.float32).");
+  }
+  if (pts1.ndim() != 2 || pts1.shape(0) != 8 || pts1.shape(1) != 2) {
+    throw std::runtime_error("Pts1 must have shape [8,2]. Ensure the array is transposed correctly.");
+  }
+  if (pts2.ndim() != 2 || pts2.shape(0) != 8 || pts2.shape(1) != 2) {
+    throw std::runtime_error("Pts2 must have shape [8,2]. Ensure the array is transposed correctly.");
+  }
+
+  // Convert numpy array to vectors (and collapse all into 1D vector).
+  std::vector<float> pts1_vec(pts1.data(), pts1.data() + pts1.size());
+  std::vector<float> pts2_vec(pts2.data(), pts2.data() + pts2.size());
+  std::vector<float> output_F_vec(9);
+  printf("inside py cuda eight point minimal, about to call cuda\n");
+  cuda_eight_point_minimal(pts1_vec, pts2_vec, M, output_F_vec);
+  printf("finished callign cuda eight point minimal\n");
+
+  // Convert output vector to a numpy array to be returned.
+  py::array_t<float> output_F_numpy(
+    std::vector<size_t>{3,3}, // shape = (3,3)
+    output_F_vec.data()
+  );
+
+  return output_F_numpy;
+}
+
 PYBIND11_MODULE(cuda_ransac_module, m) {
     m.doc() = "Pybind11-CUDA bindings for the Ransac kernel.";
     
@@ -66,4 +104,7 @@ PYBIND11_MODULE(cuda_ransac_module, m) {
     m.def("cuda_compute_symmetric_epipolar_dist", &py_cuda_compute_symmetric_epipolar_dist, 
         "Compute the epipolar distance for all homogeneous points using the GPU."
     );
+
+    m.def("cuda_eight_point_minimal", &py_cuda_eight_point_minimal,
+        "Eight point algorithm without the refinement.");
 }

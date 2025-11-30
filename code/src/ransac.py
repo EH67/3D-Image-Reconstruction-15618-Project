@@ -71,6 +71,8 @@ def eightpoint_minimal(pts1, pts2, M):
     Stripped-down version of eightpoint for fast RANSAC loop execution.
     Only computes LSE, singularizes, and unscales. Skips refinement.
     '''
+    print("pts1.shape", pts1.shape)
+    print("M", M)
     N = pts1.shape[0]
     T = np.array([[1.0/M, 0,     0],
                   [0,     1.0/M, 0],
@@ -81,6 +83,7 @@ def eightpoint_minimal(pts1, pts2, M):
 
     x1, y1 = pts1_norm[:, 0], pts1_norm[:, 1]
     x2, y2 = pts2_norm[:, 0], pts2_norm[:, 1]
+    print("x1", x1.shape, "y1", y1.shape, "x2", x2.shape, "y2", y2.shape)
 
     A = np.stack([
         x2 * x1, x2 * y1, x2,
@@ -88,6 +91,7 @@ def eightpoint_minimal(pts1, pts2, M):
         x1, y1, np.ones(N)
     ], axis=1)
     print("A shape", A.shape)
+
 
     _, _, Vh = np.linalg.svd(A)
     f = Vh[-1, :]

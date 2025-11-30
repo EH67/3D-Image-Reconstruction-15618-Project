@@ -101,3 +101,220 @@ void cuda_compute_symmetric_epipolar_dist(const std::vector<float>& F,
   cudaFree(hpts2_dev);
   cudaFree(output_dev);
 }
+
+// ROWS: Number of rows in A
+// COLS: Number of columns in A (and rows/cols of V)
+// ITERS: Number of Jacobi sweeps 
+template <int ROWS, int COLS, int ITERS>
+__device__ void svd_jacobi_generic(float* A, float* V) {
+    // 1. Initialize V to Identity
+    #pragma unroll
+    for (int i = 0; i < COLS * COLS; i++) V[i] = 0.0f;
+    #pragma unroll
+    for (int i = 0; i < COLS; i++) V[i * COLS + i] = 1.0f;
+
+    // 2. Perform Sweeps
+    #pragma unroll
+    for (int iter = 0; iter < ITERS; iter++) {
+        // Iterate over all column pairs (p < q)
+        #pragma unroll
+        for (int p = 0; p < COLS - 1; p++) {
+            #pragma unroll
+            for (int q = p + 1; q < COLS; q++) {
+                
+                float a = 0.0f, b = 0.0f, d = 0.0f;
+
+                // Dot products over ROWS
+                #pragma unroll
+                for (int i = 0; i < ROWS; i++) {
+                    float val_p = A[i * COLS + p]; 
+                    float val_q = A[i * COLS + q]; 
+                    a += val_p * val_p;
+                    b += val_q * val_q;
+                    d += val_p * val_q;
+                }
+
+                if (fabsf(d) < 1e-9f) continue; 
+
+                // Standard Jacobi Math
+                float tau = (b - a) / (2.0f * d);
+                float sign = (tau >= 0.0f) ? 1.0f : -1.0f;
+                float t = sign / (fabsf(tau) + sqrtf(1.0f + tau * tau));
+                float c = 1.0f / sqrtf(1.0f + t * t);
+                float s = c * t;
+
+                // Apply rotation to A (ROWS)
+                #pragma unroll
+                for (int i = 0; i < ROWS; i++) {
+                    float Ap = A[i * COLS + p];
+                    float Aq = A[i * COLS + q];
+                    A[i * COLS + p] = c * Ap - s * Aq;
+                    A[i * COLS + q] = s * Ap + c * Aq;
+                }
+
+                // Apply rotation to V (COLS)
+                #pragma unroll
+                for (int i = 0; i < COLS; i++) {
+                    float Vp = V[i * COLS + p];
+                    float Vq = V[i * COLS + q];
+                    V[i * COLS + p] = c * Vp - s * Vq;
+                    V[i * COLS + q] = s * Vp + c * Vq;
+                }
+            }
+        }
+    }
+}
+
+// Extract Min Singular Vector (Templated for loop unrolling)
+template <int ROWS, int COLS>
+__device__ void get_min_singular_vector_generic(const float* A_final, const float* V_final, float* f_out) {
+    float min_norm_sq = FLT_MAX;
+    int min_col_idx = 0;
+
+    #pragma unroll
+    for (int col = 0; col < COLS; col++) {
+        float norm_sq = 0.0f;
+        #pragma unroll
+        for (int row = 0; row < ROWS; row++) {
+            float val = A_final[row * COLS + col];
+            norm_sq += val * val;
+        }
+        
+        if (norm_sq < min_norm_sq) {
+            min_norm_sq = norm_sq;
+            min_col_idx = col;
+        }
+    }
+
+    #pragma unroll
+    for (int i = 0; i < COLS; i++) {
+        f_out[i] = V_final[i * COLS + min_col_idx];
+    }
+}
+
+
+__device__ void singularize_3x3(float* F) {
+    float A[9];
+    float V[9];
+    #pragma unroll
+    for (int i = 0; i < 9; i++) A[i] = F[i];
+
+    // 3 Rows, 3 Cols, 4 Iterations
+    svd_jacobi_generic<3, 3, 4>(A, V);
+
+    float v_min[3];
+    get_min_singular_vector_generic<3, 3>(A, V, v_min);
+
+    // Project F
+    float F_dot_v[3]; 
+    F_dot_v[0] = F[0]*v_min[0] + F[1]*v_min[1] + F[2]*v_min[2];
+    F_dot_v[1] = F[3]*v_min[0] + F[4]*v_min[1] + F[5]*v_min[2];
+    F_dot_v[2] = F[6]*v_min[0] + F[7]*v_min[1] + F[8]*v_min[2];
+
+    #pragma unroll
+    for(int i=0; i<3; i++) {
+        #pragma unroll
+        for(int j=0; j<3; j++) {
+            F[i*3+j] -= F_dot_v[i] * v_min[j];
+        }
+    }
+}
+
+
+// TODO pass in the normalized pts in ONE array.
+__global__ void kernel_eight_point_minimal(const float* pts1_dev, const float* pts2_dev, const size_t M, float* output_F_dev) {
+  int tid = threadIdx.x;
+
+  __shared__ float s_A[72]; // shape 8*9
+  float V[81];
+
+  // First 8 threads for this block populates A matrix (1 thread per row).
+  // Computes each of the eq given in np.stack() of the Python implementation.
+  if (tid < 8) {
+    // Load x,y value of points needed for this row & normalize.
+    float x1 = pts1_dev[tid * 2] / M;
+    float y1 = pts1_dev[tid * 2 + 1] / M;
+    float x2 = pts2_dev[tid * 2] / M;
+    float y2 = pts2_dev[tid * 2 + 1] / M;
+
+    // Populate a row for the A matrix.
+    s_A[tid * 9 + 0] = x2 * x1;
+    s_A[tid * 9 + 1] = x2 * y1;
+    s_A[tid * 9 + 2] = x2;
+    s_A[tid * 9 + 3] = y2 * x1;
+    s_A[tid * 9 + 4] = y2 * y1;
+    s_A[tid * 9 + 5] = y2;
+    s_A[tid * 9 + 6] = x1;
+    s_A[tid * 9 + 7] = y1;
+    s_A[tid * 9 + 8] = 1.0f;
+  }
+  __syncthreads();
+
+  if (tid == 0) {
+    printf("CUDA A matrix: \n");
+    for (int i = 0 ; i < 8 ; i++) {
+      for (int j = 0 ; j < 9 ; j++) {
+        printf("%.6f ", s_A[i * 9 + j]);
+      }
+      printf("\n");
+    }
+    printf("\n");
+  }
+  __syncthreads();
+
+  if (tid == 0) {
+    // _, _, Vh = np.linalg.svd(A)
+    svd_jacobi_generic<8, 9, 15>(s_A, V);
+
+    // Get F_norm and singularize it (to get rank 2)
+    float f[9];
+    get_min_singular_vector_generic<8,9>(s_A,V,f);
+    singularize_3x3(f);
+
+    // Unscale F
+    float m_inv = 1.0f / (float)M;
+    float T[3] = {m_inv, m_inv, 1.0f};
+
+    for(int r=0; r<3; r++) {
+        for(int c=0; c<3; c++) {
+            f[r*3+c] *= (T[r] * T[c]);
+        }
+    }
+
+    float scale = (fabsf(f[8]) > 1e-10f) ? (1.0f / f[8]) : 1.0f;
+    for(int i=0; i<9; i++) output_F_dev[i] = f[i] * scale;
+  }
+}
+
+void cuda_eight_point_minimal(const std::vector<float>& pts1, const std::vector<float>&pts2, const size_t M, std::vector<float>& output_F) {
+  float *pts1_dev, *pts2_dev, *output_F_dev;
+  size_t pts_size = pts1.size() * sizeof(float);
+  size_t output_F_size = 9 * sizeof(float);
+  printf("line 167\n");
+
+  cudaMalloc((void**)&pts1_dev, pts_size);
+  cudaMalloc((void**)&pts2_dev, pts_size);
+  cudaMalloc((void**)&output_F_dev, output_F_size);
+  printf("line 172\n");
+
+  // Copy data from Host to Device.
+  cudaMemcpy(pts1_dev, pts1.data(), pts_size, cudaMemcpyHostToDevice);
+  cudaMemcpy(pts2_dev, pts2.data(), pts_size, cudaMemcpyHostToDevice);
+  printf("line 177\n");
+  
+  // Configure and launch kernel.
+  int threadsPerBlock = 256;
+  int numBlocks = 1;
+  size_t shared_mem_size = 8 * 9 + 9; // For T and A.
+  printf("about to call kernel\n");
+  kernel_eight_point_minimal<<<numBlocks, threadsPerBlock, sizeof(float) * shared_mem_size>>>(pts1_dev, pts2_dev, M, output_F_dev);
+  printf("finished calling kernel\n");
+
+  // Copy output device to host.
+  output_F.resize(9);
+  cudaMemcpy(output_F.data(), output_F_dev, output_F_size, cudaMemcpyDeviceToHost);
+ 
+  cudaFree(pts1_dev);
+  cudaFree(pts2_dev);
+  cudaFree(output_F_dev);
+}
