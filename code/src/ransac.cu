@@ -517,3 +517,28 @@ __global__ void ransac_kernel(
     }
   }
 }
+
+void cuda_ransac(const std::vector<float> &pts1, const std::vector<float> &pts2, const size_t M, std::vector<float>& output_F, int num_iters, float threshold) {
+  float *pts1_dev, *pts2_dev, *out_fund_matrix_dev;
+  int *out_inlier_counts_dev;
+  curandState *rand_states_dev;
+  size_t pts_size = pts1.size() * sizeof(float);
+  size_t output_F_size = 9 * num_iters * sizeof(float);
+  size_t output_inlier_cnt_size = num_iters * sizeof(int);
+  size_t rand_states_size = num_iters * sizeof(curandState);
+
+  cudaMalloc((void**)&pts1_dev, pts_size);
+  cudaMalloc((void**)&pts2_dev, pts_size);
+  cudaMalloc((void**)&out_fund_matrix_dev, output_F_size);
+  cudaMalloc((void**)&out_inlier_counts_dev, output_inlier_cnt_size);
+  cudaMalloc((void**)&rand_states_dev, rand_states_size);
+
+  // Copy data from Host to Device.
+  cudaMemcpy(pts1_dev, pts1.data(), pts_size, cudaMemcpyHostToDevice);
+  cudaMemcpy(pts2_dev, pts2.data(), pts_size, cudaMemcpyHostToDevice);
+
+  // Initialize cudaRand state for each block in the RANSAC algo.
+  // init_rng<<<1, num_iters>>>()
+
+
+}
