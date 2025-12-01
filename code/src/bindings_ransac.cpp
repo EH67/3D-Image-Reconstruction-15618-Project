@@ -12,9 +12,13 @@ namespace py = pybind11;
 * @brief Python wrapper for computing epipolar dist.
 *
 * @param F 3*3 fundamental matrix
-* @param hpts1 N*3 homogeneous points from image 1
-* @param hpts2 N*3 homogeneous points from image 2
+* @param hpts1 N*2 homogeneous points from image 1
+* @param hpts2 N*2 homogeneous points from image 2
 * 
+* Unlike the python version where hpts1 and hpts2 are N*3 in which dim 3 was filled with 1s so that
+* numpy can perform matrix ops and shape matches, for the cuda version we are keeping it as N*2
+* and only keeping the point information.
+*
 * @return a n 
 */
 py::array_t<float> py_cuda_compute_symmetric_epipolar_dist(
@@ -28,11 +32,11 @@ py::array_t<float> py_cuda_compute_symmetric_epipolar_dist(
       if (F.size() != 9 || F.ndim() != 2 || F.shape(0) != 3 || F.shape(1) != 3) {
         throw std::runtime_error("Fundamental matrix must be 3*3.");
       }
-      if (hpts1.ndim() != 2 || hpts1.shape(1) != 3) {
-        throw std::runtime_error("hpts1 must has shape (N * 3)");
+      if (hpts1.ndim() != 2 || hpts1.shape(1) != 2) {
+        throw std::runtime_error("hpts1 must has shape (N * 2)");
       }
-      if (hpts2.ndim() != 2 || hpts2.shape(1) != 3) {
-        throw std::runtime_error("hpts2 must has shape (N * 3)");
+      if (hpts2.ndim() != 2 || hpts2.shape(1) != 2) {
+        throw std::runtime_error("hpts2 must has shape (N * 2)");
       }
       if (hpts1.shape(0) != hpts2.shape(0)) {
         throw std::runtime_error("hpts1 and hpts2 do not have the same N");

@@ -8,9 +8,9 @@
 
 __device__ float3 load_point(const float* pts, int ind) {
   float3 p;
-  p.x = pts[ind * 3];
-  p.y = pts[ind * 3 + 1];
-  p.z = pts[ind * 3 + 2];
+  p.x = pts[ind * 2];
+  p.y = pts[ind * 2 + 1];
+  p.z = pts[ind * 2 + 2];
   // p.z = 1;
   return p;
 }

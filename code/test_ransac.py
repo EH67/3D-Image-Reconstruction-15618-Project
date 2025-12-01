@@ -58,7 +58,7 @@ try:
     # F_flat = F_model.flatten()
 
     start_time_gpu = time.time()
-    errors_gpu_flat = cuda_ransac_module.cuda_compute_symmetric_epipolar_dist(F_model, hpts1, hpts2)
+    errors_gpu_flat = cuda_ransac_module.cuda_compute_symmetric_epipolar_dist(F_model, pts1, pts2)
     end_time_gpu = time.time()
     print(f"CUDA (GPU Result) Time: {(end_time_gpu - start_time_gpu) * 1000:.3f} ms")
     
