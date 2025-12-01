@@ -1,6 +1,7 @@
 #include "ransac.cuh"
 
 #include <cuda_runtime.h>
+#include <curand_kernel.h>
 #include <cmath>
 #include <iostream>
 #include <float.h>
@@ -10,6 +11,7 @@ __device__ float3 load_point(const float* pts, int ind) {
   p.x = pts[ind * 3];
   p.y = pts[ind * 3 + 1];
   p.z = pts[ind * 3 + 2];
+  // p.z = 1;
   return p;
 }
 
@@ -107,13 +109,13 @@ void cuda_compute_symmetric_epipolar_dist(const std::vector<float>& F,
 // ITERS: Number of Jacobi sweeps 
 template <int ROWS, int COLS, int ITERS>
 __device__ void svd_jacobi_generic(float* A, float* V) {
-    // 1. Initialize V to Identity
+    // Initialize V to Identity
     #pragma unroll
     for (int i = 0; i < COLS * COLS; i++) V[i] = 0.0f;
     #pragma unroll
     for (int i = 0; i < COLS; i++) V[i * COLS + i] = 1.0f;
 
-    // 2. Perform Sweeps
+    // Perform Sweeps
     #pragma unroll
     for (int iter = 0; iter < ITERS; iter++) {
         // Iterate over all column pairs (p < q)
@@ -221,7 +223,72 @@ __device__ void singularize_3x3(float* F) {
 }
 
 
-// TODO pass in the normalized pts in ONE array.
+// s_A is [8*9] matrix in shared mem
+__device__ void device_eight_point_minimal(const float* pts1_dev, const float* pts2_dev, const size_t M, float* output_F_dev, float* s_A) {
+  int tid = threadIdx.x;
+
+  float V[81];
+
+  // First 8 threads for this block populates A matrix (1 thread per row).
+  // Computes each of the eq given in np.stack() of the Python implementation.
+  if (tid < 8) {
+    // Load x,y value of points needed for this row & normalize.
+    float x1 = pts1_dev[tid * 2] / M;
+    float y1 = pts1_dev[tid * 2 + 1] / M;
+    float x2 = pts2_dev[tid * 2] / M;
+    float y2 = pts2_dev[tid * 2 + 1] / M;
+
+    // Populate a row for the A matrix.
+    s_A[tid * 9 + 0] = x2 * x1;
+    s_A[tid * 9 + 1] = x2 * y1;
+    s_A[tid * 9 + 2] = x2;
+    s_A[tid * 9 + 3] = y2 * x1;
+    s_A[tid * 9 + 4] = y2 * y1;
+    s_A[tid * 9 + 5] = y2;
+    s_A[tid * 9 + 6] = x1;
+    s_A[tid * 9 + 7] = y1;
+    s_A[tid * 9 + 8] = 1.0f;
+  }
+  __syncthreads();
+
+  if (tid == 0) {
+    printf("CUDA A matrix: \n");
+    for (int i = 0 ; i < 8 ; i++) {
+      for (int j = 0 ; j < 9 ; j++) {
+        printf("%.6f ", s_A[i * 9 + j]);
+      }
+      printf("\n");
+    }
+    printf("\n");
+  }
+  __syncthreads();
+
+  if (tid == 0) {
+    // _, _, Vh = np.linalg.svd(A)
+    svd_jacobi_generic<8, 9, 15>(s_A, V);
+
+    // Get F_norm and singularize it (to get rank 2)
+    float f[9];
+    get_min_singular_vector_generic<8,9>(s_A,V,f);
+    singularize_3x3(f);
+
+    // Unscale F
+    float m_inv = 1.0f / (float)M;
+    float T[3] = {m_inv, m_inv, 1.0f};
+
+    for(int r=0; r<3; r++) {
+        for(int c=0; c<3; c++) {
+            f[r*3+c] *= (T[r] * T[c]);
+        }
+    }
+
+    float scale = (fabsf(f[8]) > 1e-10f) ? (1.0f / f[8]) : 1.0f;
+    for(int i=0; i<9; i++) output_F_dev[i] = f[i] * scale;
+  }
+}
+
+
+// TODO: ONLY USED FOR TESTING, use device_eight_point_minimal for the actual pipeline.
 __global__ void kernel_eight_point_minimal(const float* pts1_dev, const float* pts2_dev, const size_t M, float* output_F_dev) {
   int tid = threadIdx.x;
 
@@ -317,4 +384,83 @@ void cuda_eight_point_minimal(const std::vector<float>& pts1, const std::vector<
   cudaFree(pts1_dev);
   cudaFree(pts2_dev);
   cudaFree(output_F_dev);
+}
+
+// NOTE: Call with diff dims than calling ransac - only need num_blocks # of threads.
+// Populates state array with the random state (will be used in ransac).
+__global__ void init_rng(curandState *state, unsigned long long seed, int num_blocks) {
+    int id = blockIdx.x * blockDim.x + threadIdx.x;
+    if (id < num_blocks) {
+        // Each block needs its own random state to be independent
+        curand_init(seed, id, 0, &state[id]);
+    }
+}
+
+
+__global__ void ransac_kernel(
+  const float* pts1,
+  const float* pts2,
+  int num_points,
+  float M, 
+  int num_iters,
+  float threadhold, 
+  curandState *global_states, // Each block gets their own rand state
+  float* out_fund_matrix, // [num_iters * 9] dim, fund matrix for each block
+  int* out_inlier_counts // [num_iters] dim, inlier count for each block
+) {
+  // Points for eight point algo.
+  __shared__ float s_pts1[8 * 2];
+  __shared__ float s_pts2[8 * 2];
+  // Fundamental matrix for this block.
+  __shared__ float s_F[9];
+  // Used for reduction of inliers.
+  __shared__ int s_block_inliers;
+  // Used during eight point algo.
+  __shared__ float s_A[72]; // shape 8*9
+
+  int tid = threadIdx.x;
+  int bid = blockIdx.x;
+ 
+  // T0 randomly generates the 8 points for the algo.
+  if (tid == 0) {
+    curandState local_state = global_states[bid];
+
+    // Pick 8 unique points.
+    int indices[8];
+    for (int i = 0 ; i < 8 ; i++) {
+      while (true) {
+        // Generate num btwn 0 to N-1.
+        float rand_float = curand_uniform(&local_state);
+        int idx = (int) (rand_float * (num_points - 0.00001f));
+
+        // Check uniqueness.
+        bool unique = true;
+        for (int k = 0 ; k < i ; k++) {
+          if (indices[k] == idx) {
+            unique = false;
+            break;
+          }
+        }
+
+        if (unique) {
+          indices[i] = idx;
+          break;
+        }
+      }
+
+      // Load points into shared mem
+      s_pts1[i*2] = pts1[indices[i] * 2];
+      s_pts1[i*2+1] = pts1[indices[i] * 2 + 1];
+      s_pts2[i*2] = pts2[indices[i] * 2];
+      s_pts2[i*2+1] = pts2[indices[i] * 2 + 1];
+    }
+  }
+
+  __syncthreads();
+
+  // Compute fundamental matrix.
+  device_eight_point_minimal(s_pts1, s_pts2, M, s_F, s_A);
+  __syncthreads();
+
+  //
 }
