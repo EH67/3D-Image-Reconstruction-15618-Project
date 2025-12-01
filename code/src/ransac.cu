@@ -10,11 +10,53 @@ __device__ float3 load_point(const float* pts, int ind) {
   float3 p;
   p.x = pts[ind * 2];
   p.y = pts[ind * 2 + 1];
-  p.z = pts[ind * 2 + 2];
-  // p.z = 1;
+  p.z = 1;
   return p;
 }
 
+__device__ int device_compute_symmetric_epipolar_dist(const float* s_F, const float* hpts1_dev, const float* hpts2_dev, int N, float threshold) {
+  int idx = threadIdx.x;
+
+  int local_count = 0; // # of inliers this thread encountered.
+
+  for (int i = idx ; i < N ; i += blockDim.x) {
+     // Get the point for image 1 and 2 this thread is in charge of.
+    float3 p1 = load_point(hpts1_dev, idx);
+    float3 p2 = load_point(hpts2_dev, idx);
+
+    // Get Epipolar Lines l2 = F * p1.
+    // l2 = [a, b, c] where ax + by + c = 0
+    float3 l2;
+    l2.x = s_F[0] * p1.x + s_F[1] * p1.y + s_F[2] * p1.z;
+    l2.y = s_F[3] * p1.x + s_F[4] * p1.y + s_F[5] * p1.z;
+    l2.z = s_F[6] * p1.x + s_F[7] * p1.y + s_F[8] * p1.z;
+
+    // Get Epipolar Lines l1 = F.T * p2.
+    float3 l1;
+    l1.x = s_F[0] * p2.x + s_F[3] * p2.y + s_F[6] * p2.z;
+    l1.y = s_F[1] * p2.x + s_F[4] * p2.y + s_F[7] * p2.z;
+    l1.z = s_F[2] * p2.x + s_F[5] * p2.y + s_F[8] * p2.z;
+
+    // Get numerator (epipolar constraint).
+    // p2.T * F * p1, same as dot product of p2 and l2.
+    float numerator = p2.x * l2.x + p2.y * l2.y + p2.z * l2.z;
+    float numerator_squared = numerator * numerator;
+
+    // Denom: squared norm of x and y of the lines.
+    float denom2 = l2.x * l2.x + l2.y * l2.y;
+    float denom1 = l1.x * l1.x + l1.y * l1.y;
+
+    // Compute final epipolar dist.
+    float err = (numerator_squared / denom2) + (numerator_squared / denom1);
+    if (err < threshold) {
+      local_count++;
+    }
+  }
+
+  return local_count;
+}
+
+// TODO: only use for testing, use the device func for actual pipeline.
 __global__ void kernel_compute_symmetric_epipolar_dist(const float* F_dev, const float* hpts1_dev, const float* hpts2_dev, float* output_dev, int N) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -287,7 +329,6 @@ __device__ void device_eight_point_minimal(const float* pts1_dev, const float* p
   }
 }
 
-
 // TODO: ONLY USED FOR TESTING, use device_eight_point_minimal for the actual pipeline.
 __global__ void kernel_eight_point_minimal(const float* pts1_dev, const float* pts2_dev, const size_t M, float* output_F_dev) {
   int tid = threadIdx.x;
@@ -403,7 +444,7 @@ __global__ void ransac_kernel(
   int num_points,
   float M, 
   int num_iters,
-  float threadhold, 
+  float threshold, 
   curandState *global_states, // Each block gets their own rand state
   float* out_fund_matrix, // [num_iters * 9] dim, fund matrix for each block
   int* out_inlier_counts // [num_iters] dim, inlier count for each block
@@ -462,5 +503,17 @@ __global__ void ransac_kernel(
   device_eight_point_minimal(s_pts1, s_pts2, M, s_F, s_A);
   __syncthreads();
 
-  //
+  // Compute epipolar dist for all point pairs.
+  int local_inlier_cnt = device_compute_symmetric_epipolar_dist(s_F, pts1, pts2, num_points, threshold);
+  atomicAdd(&s_block_inliers, local_inlier_cnt); 
+
+  __syncthreads();
+
+  // Write output.
+  if (tid == 0) {
+    out_inlier_counts[bid] = s_block_inliers;
+    for (int i = 0 ; i < 9 ; i++) {
+      out_fund_matrix[bid * 9 + i] = s_F[i];
+    }
+  }
 }
