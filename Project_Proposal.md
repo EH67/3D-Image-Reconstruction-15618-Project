@@ -33,5 +33,9 @@ We chose to use the GHC machines as this project relies on many embarrassingly p
 
 ## Schedule
 1.  11/17-11/23: Design and implement a serial version of the pipeline that can take in sets of images and output a 3D reconstruction of the image. Additionally, we will implement a program to take the reconstruction and render it.
-2. 11/24-11/30: Implement a working GPU implementation that successfully reconstructs the 3D points, comparing output to the serial version for correctness.
-3. 12/1-12/8: Optimize the GPU implementation to compute 3D points faster. Work on implementing "hope to achieve" goals like computing points from a video or computing points in real time.
+2. 11/24-11/30: Implement parallel versions of triangulation, eight point algorithm, and computing epipolar distances acros all point pairs.
+3. 12/1 (Emily): Finish RANSAC implementation
+4. 12/1-12/3 (Matt): Parse video into multiple frames / images so we can process many pairs of images instead of just 1. Utilize bundle adjustment to minimize reprojection error.
+5. 12/2-12/4: (Emily & Matt): Assemble the whole reconstruction pipeline & ensure correctness.
+6. 12/5-12/8 (Matt): Explore implementing live video processing to reconstruct points in real time and investigate parallelization of the SIFT algorithm.
+7. 12/5-12/8 (Emily): Optimize the RANSAC algorithm & overall pipeline to increase parallelism and performance.
