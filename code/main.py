@@ -5,7 +5,8 @@ import time
 import cv2
 import scipy
 
-from src.ransac import ransac_fundamental_matrix, _singularize
+from src.ransac import ransac_fundamental_matrix, _singularize, compute_symmetric_epipolar_distance
+from src.correspondence import get_correspondences_cpu, get_correspondences_gpu
 
 # Below code are needed in order to load the cuda modules we wrote/compiled (stored in /build).
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -14,116 +15,146 @@ sys.path.insert(0, build_dir) # add path with /build to sys path.
 
 # Import any modules defined by PYBIND11_MODULE from src/bindings.cpp.
 import cuda_ops_module 
-
-# MIN_SAMPLE_SIZE = 8
-
-# def _singularize(F):
-#     U, S, V = np.linalg.svd(F)
-#     S[-1] = 0
-#     F = U.dot(np.diag(S).dot(V))
-#     return F
+import cuda_ransac_module
 
 
+EXPORT_OUTPUT = False # Creates .npz for the correspondance output to be plotted using Colab
 
 
+def export_visualization_data(filename, img1, img2, pts1, pts2):
+    """
+    Saves images and inlier coordinates to a .npz file.
+    """
+    print(f"Exporting data to {filename}...")
+    # Ensure points are numpy arrays
+    pts1 = np.array(pts1)
+    pts2 = np.array(pts2)
+    
+    # Save compressed to save space
+    np.savez_compressed(
+        filename,
+        img1=img1,
+        img2=img2,
+        pts1=pts1,
+        pts2=pts2
+    )
+    print("Export complete.")
 
 
+def compare_matrices(F1, F2):
+    """
+    Compares two Fundamental matrices for similarity.
+    Since F is scale-invariant, we normalize them before comparing.
+    Also handles the sign ambiguity (F is equivalent to -F).
+    """
+    if F1 is None or F2 is None:
+        return float('inf')
 
+    # 1. Normalize both matrices to have Frobenius norm = 1
+    F1_norm = F1 / np.linalg.norm(F1)
+    F2_norm = F2 / np.linalg.norm(F2)
 
-#newer version of finding epipolar correspondences that uses SIFT and FLAAN to be faster.
-def get_correspondences(img1, img2, M):
-    #feature matching
-    sift = cv2.SIFT_create()
+    # 2. Handle sign ambiguity: If the directions are opposite, flip one
+    # We check the sign of the first non-zero element or simply dot product
+    if np.sum(F1_norm * F2_norm) < 0:
+        F2_norm = -F2_norm
 
-    kp1, des1 = sift.detectAndCompute(img1, None)
-    kp2, des2 = sift.detectAndCompute(img2, None)
+    # 3. Compute Frobenius distance (element-wise Euclidean distance)
+    diff = np.linalg.norm(F1_norm - F2_norm)
+    return diff
 
-    FLANN_INDEX_KDTREE = 1
-    index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
-    search_params = dict(checks=50)
-
-    #knn matching using FLANN
-    flann = cv2.FlannBasedMatcher(index_params, search_params)
-    matches = flann.knnMatch(des1, des2, k=2)
-
-    good_matches = []
-    pts1_candidates = []
-    pts2_candidates = []
-
-    #ratio testing: ensuring best point is significantly different from second best
-    for m, n in matches:
-        if m.distance < 0.8 * n.distance:
-            good_matches.append(m)
-
-            pts1_candidates.append(kp1[m.queryIdx].pt)
-            pts2_candidates.append(kp2[m.trainIdx].pt)
-
-    pts1_candidates = np.float32(pts1_candidates)
-    pts2_candidates = np.float32(pts2_candidates)
-
-    print(f"Found {len(pts1_candidates)} raw matches after Ratio Test.")
-    if len(pts1_candidates) < 8:
-        print("Not enough matches to compute fundamental matrix Using 8 point algorithm.")
-        return None, None, None
-
-  #ransac
-    F, mask = cv2.findFundamentalMat(pts1_candidates, pts2_candidates, cv2.FM_RANSAC, 3.0, 0.99)
-    F_2, mask_2 = ransac_fundamental_matrix(pts1_candidates, pts2_candidates, M, 10000, 3.0)
-    print("F", F.shape)
-    print(F)
-    print("F_2", F_2.shape)
-    print(F_2)
-
-
-    #only use inliers
-    pts1 = pts1_candidates[mask_2 == 1]
-    pts2 = pts2_candidates[mask_2 == 1]
-    print("pts1.shape", pts1.shape, "pts2.shape", pts2.shape, "mask_2.shape", mask_2.shape)
-
-    inlier_matches_vis_new = []
-    for i, match in enumerate(good_matches):
-        if mask_2[i]:
-            inlier_matches_vis_new.append(match)
-
-    # visualize_inliers(im1, kp1, im2, kp2, inlier_matches_vis)
-
-    #   return pts1, pts2, F
-    return pts1, pts2, F_2
 
 if __name__=='__main__':
-  IMAGE_DIR = os.path.abspath(os.path.join(current_dir, 'images'))
-  IM1_PATH = os.path.join(IMAGE_DIR, 'bag1.jpg')
-  IM2_PATH = os.path.join(IMAGE_DIR, 'bag2.jpg')
-  print(IM1_PATH)
+    IMAGE_DIR = os.path.abspath(os.path.join(current_dir, 'images'))
+    IM1_PATH = os.path.join(IMAGE_DIR, 'bag3.jpg')
+    IM2_PATH = os.path.join(IMAGE_DIR, 'bag4.jpg')
+    print(IM1_PATH)
 
-  # Load images as BGR for OpenCV functions, then convert to RGB for Matplotlib
-  im1 = cv2.imread(IM1_PATH)
-  im2 = cv2.imread(IM2_PATH)
-  if im1 is None or im2 is None:
-      raise FileNotFoundError(f"Could not find {IM1_PATH} or {IM2_PATH}. Please check file paths.")
+    # Load images as BGR for OpenCV functions, then convert to RGB for Matplotlib
+    im1 = cv2.imread(IM1_PATH)
+    im2 = cv2.imread(IM2_PATH)
+    if im1 is None or im2 is None:
+        raise FileNotFoundError(f"Could not find {IM1_PATH} or {IM2_PATH}. Please check file paths.")
 
-  im1_rgb = cv2.cvtColor(im1, cv2.COLOR_BGR2RGB)
-  im2_rgb = cv2.cvtColor(im2, cv2.COLOR_BGR2RGB)
-  h, w, _ = im1.shape
-  M = np.max([w, h])
+    im1_rgb = cv2.cvtColor(im1, cv2.COLOR_BGR2RGB)
+    im2_rgb = cv2.cvtColor(im2, cv2.COLOR_BGR2RGB)
+    h, w, _ = im1.shape
+    M = np.max([w, h])
 
-  # Approximate camera intrinsics of the media sent in.
-  focal_length = w * 1.2
-  cx = w / 2.0
-  cy = h / 2.0
+    # Approximate camera intrinsics of the media sent in.
+    focal_length = w * 1.2
+    cx = w / 2.0
+    cy = h / 2.0
 
-  K_mock = np.array([
-      [focal_length, 0, cx],
-      [0, focal_length, cy],
-      [0, 0, 1]
-  ])
+    K_mock = np.array([
+        [focal_length, 0, cx],
+        [0, focal_length, cy],
+        [0, 0, 1]
+    ])
 
 
-  intrinsics_mock = {'K1': K_mock, 'K2': K_mock}
-  K1, K2 = K_mock, K_mock
+    intrinsics_mock = {'K1': K_mock, 'K2': K_mock}
+    K1, K2 = K_mock, K_mock
 
-  print(f"Image Resolution: {w}x{h}")
-  print("Mock Intrinsics K:\n", K1.round(2))
+    print(f"Image Resolution: {w}x{h}")
+    print("Mock Intrinsics K:\n", K1.round(2))
 
-  #find correspondences
-  pts1_in, pts2_in, F_auto = get_correspondences(im1, im2, M)
+    # --- 1. Run CPU Benchmark ---
+    print("Running CPU Implementation...")
+    start_cpu = time.perf_counter()
+    
+    pts1_in, pts2_in, F_cpu = get_correspondences_cpu(im1, im2, M)
+    
+    end_cpu = time.perf_counter()
+    time_cpu = end_cpu - start_cpu
+    
+    num_inliers_cpu = len(pts1_in) if pts1_in is not None else 0
+    print(f"CPU Finished. Time: {time_cpu:.4f}s | Inliers: {num_inliers_cpu}")
+    print("-" * 50)
+
+    # --- 2. Run GPU Benchmark ---
+    print("Running GPU Implementation...")
+    
+    start_gpu = time.perf_counter()
+    
+    pts1_in_gpu, pts2_in_gpu, F_gpu = get_correspondences_gpu(im1, im2, M)
+    
+    end_gpu = time.perf_counter()
+    time_gpu = end_gpu - start_gpu
+    
+    num_inliers_gpu = len(pts1_in_gpu) if pts1_in_gpu is not None else 0
+    print(f"GPU Finished. Time: {time_gpu:.4f}s | Inliers: {num_inliers_gpu}")
+    print("-" * 50)
+
+    # --- 3. Analysis & Export ---
+    
+    # Speedup Calculation
+    if time_gpu > 0:
+        speedup = time_cpu / time_gpu
+        print(f"Speedup: {speedup:.2f}x")
+    
+    # Correctness Check
+    # Note: RANSAC is randomized, so F matrices will rarely be identical.
+    # We check if they are geometrically close.
+    diff = compare_matrices(F_cpu, F_gpu)
+    print(f"Matrix Similarity Score (Frobenius Norm Diff): {diff:.4f}")
+    
+    if diff < 0.1:
+        print(">> SUCCESS: Matrices are very similar.")
+    elif diff < 0.5:
+        print(">> ACCEPTABLE: Matrices are somewhat similar (expected due to RANSAC randomness).")
+    else:
+        print(">> WARNING: Matrices diverged significantly.")
+
+    # Inlier Count check
+    if num_inliers_cpu > 0:
+        inlier_ratio = num_inliers_gpu / num_inliers_cpu
+        print(f"Inlier Count Ratio (GPU/CPU): {inlier_ratio:.2f}")
+
+    # Export output if applicable (upload to Colab to plot, need to have the function "plot_saved_results").
+    if EXPORT_OUTPUT:
+        if pts1_in is not None:
+            export_visualization_data("results_cpu.npz", im1, im2, pts1_in, pts2_in)
+
+        if pts1_in_gpu is not None:
+            export_visualization_data("results_gpu.npz", im1, im2, pts1_in_gpu, pts2_in_gpu)
