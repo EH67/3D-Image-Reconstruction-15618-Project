@@ -36,12 +36,12 @@ def ransac_fundamental_matrix(pts1, pts2, M, num_iterations=1000, threshold=3.0)
         # Note: We must call a stripped-down 8-point algorithm here that doesn't
         # use the non-linear refinement, as it's too slow for the RANSAC loop.
         F_model = eightpoint_minimal(sample_pts1, sample_pts2, M)
-        print("F_model shape", F_model.shape)
+        # print("F_model shape", F_model.shape)
         
         # 3. Error Calculation (Symmetric Epipolar Distance)
         # Calculate distance for ALL N points against F_model
         errors = compute_symmetric_epipolar_distance(F_model, hpts1, hpts2)
-        print("error shape", errors.shape)
+        # print("error shape", errors.shape)
 
         # 4. Consensus Check
         # Find inliers: points whose error is less than the threshold
@@ -62,7 +62,7 @@ def ransac_fundamental_matrix(pts1, pts2, M, num_iterations=1000, threshold=3.0)
     #     final_F = best_F
     
     end = time.time()
-    print("Ransac time: ", end-start)
+    # print("Ransac time: ", end-start)
     return best_F, best_mask.astype(np.uint8)
 
 
@@ -71,8 +71,6 @@ def eightpoint_minimal(pts1, pts2, M):
     Stripped-down version of eightpoint for fast RANSAC loop execution.
     Only computes LSE, singularizes, and unscales. Skips refinement.
     '''
-    print("pts1.shape", pts1.shape)
-    print("M", M)
     N = pts1.shape[0]
     T = np.array([[1.0/M, 0,     0],
                   [0,     1.0/M, 0],
@@ -83,14 +81,12 @@ def eightpoint_minimal(pts1, pts2, M):
 
     x1, y1 = pts1_norm[:, 0], pts1_norm[:, 1]
     x2, y2 = pts2_norm[:, 0], pts2_norm[:, 1]
-    print("x1", x1.shape, "y1", y1.shape, "x2", x2.shape, "y2", y2.shape)
 
     A = np.stack([
         x2 * x1, x2 * y1, x2,
         y2 * x1, y2 * y1, y2,
         x1, y1, np.ones(N)
     ], axis=1)
-    print("A shape", A.shape)
 
 
     _, _, Vh = np.linalg.svd(A)
@@ -203,7 +199,6 @@ def compute_symmetric_epipolar_distance(F, hpts1, hpts2):
     This is the core error metric used by RANSAC.
     '''
     start = time.time()
-    print("inside compute_symmetric_epipolar_distance. F.shape", F.shape, "hpts1", hpts1.shape, "hpts2", hpts2.shape)
     # F * p1 (3x3 * 3xN = 3xN) -> Epipolar lines l2 in image 2
     l2 = F @ hpts1.T
     
@@ -228,5 +223,5 @@ def compute_symmetric_epipolar_distance(F, hpts1, hpts2):
     # The error we compare against the threshold is typically the square root (pixels),
     # but since the threshold is also squared, we can return the squared error.
     end = time.time()
-    print("Time for compute_symmetric_epipolar_distance:", end-start)
+    # print("Time for compute_symmetric_epipolar_distance:", end-start)
     return errors

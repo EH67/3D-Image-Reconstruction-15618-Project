@@ -21,8 +21,8 @@ __device__ int device_compute_symmetric_epipolar_dist(const float* s_F, const fl
 
   for (int i = idx ; i < N ; i += blockDim.x) {
      // Get the point for image 1 and 2 this thread is in charge of.
-    float3 p1 = load_point(hpts1_dev, idx);
-    float3 p2 = load_point(hpts2_dev, idx);
+    float3 p1 = load_point(hpts1_dev, i);
+    float3 p2 = load_point(hpts2_dev, i);
 
     // Get Epipolar Lines l2 = F * p1.
     // l2 = [a, b, c] where ax + by + c = 0
@@ -66,12 +66,12 @@ __global__ void kernel_compute_symmetric_epipolar_dist(const float* F_dev, const
     s_F[threadIdx.x] = F_dev[threadIdx.x];
   }
   __syncthreads();
-  if (idx == 0) {
-    for (int i = 0 ; i < 9 ; i++) {
-      printf("%f ", s_F[i]);
-    }
-  }
-  __syncthreads();
+  // if (idx == 0) {
+  //   for (int i = 0 ; i < 9 ; i++) {
+  //     printf("%f ", s_F[i]);
+  //   }
+  // }
+  // __syncthreads();
 
   if (idx < N) {
      // Get the point for image 1 and 2 this thread is in charge of.
@@ -293,17 +293,17 @@ __device__ void device_eight_point_minimal(const float* pts1_dev, const float* p
   }
   __syncthreads();
 
-  if (tid == 0) {
-    printf("CUDA A matrix: \n");
-    for (int i = 0 ; i < 8 ; i++) {
-      for (int j = 0 ; j < 9 ; j++) {
-        printf("%.6f ", s_A[i * 9 + j]);
-      }
-      printf("\n");
-    }
-    printf("\n");
-  }
-  __syncthreads();
+  // if (tid == 0) {
+  //   printf("CUDA A matrix: \n");
+  //   for (int i = 0 ; i < 8 ; i++) {
+  //     for (int j = 0 ; j < 9 ; j++) {
+  //       printf("%.6f ", s_A[i * 9 + j]);
+  //     }
+  //     printf("\n");
+  //   }
+  //   printf("\n");
+  // }
+  // __syncthreads();
 
   if (tid == 0) {
     // _, _, Vh = np.linalg.svd(A)
@@ -358,17 +358,17 @@ __global__ void kernel_eight_point_minimal(const float* pts1_dev, const float* p
   }
   __syncthreads();
 
-  if (tid == 0) {
-    printf("CUDA A matrix: \n");
-    for (int i = 0 ; i < 8 ; i++) {
-      for (int j = 0 ; j < 9 ; j++) {
-        printf("%.6f ", s_A[i * 9 + j]);
-      }
-      printf("\n");
-    }
-    printf("\n");
-  }
-  __syncthreads();
+  // if (tid == 0) {
+  //   printf("CUDA A matrix: \n");
+  //   for (int i = 0 ; i < 8 ; i++) {
+  //     for (int j = 0 ; j < 9 ; j++) {
+  //       printf("%.6f ", s_A[i * 9 + j]);
+  //     }
+  //     printf("\n");
+  //   }
+  //   printf("\n");
+  // }
+  // __syncthreads();
 
   if (tid == 0) {
     // _, _, Vh = np.linalg.svd(A)
@@ -398,25 +398,21 @@ void cuda_eight_point_minimal(const std::vector<float>& pts1, const std::vector<
   float *pts1_dev, *pts2_dev, *output_F_dev;
   size_t pts_size = pts1.size() * sizeof(float);
   size_t output_F_size = 9 * sizeof(float);
-  printf("line 167\n");
 
   cudaMalloc((void**)&pts1_dev, pts_size);
   cudaMalloc((void**)&pts2_dev, pts_size);
   cudaMalloc((void**)&output_F_dev, output_F_size);
-  printf("line 172\n");
 
   // Copy data from Host to Device.
   cudaMemcpy(pts1_dev, pts1.data(), pts_size, cudaMemcpyHostToDevice);
   cudaMemcpy(pts2_dev, pts2.data(), pts_size, cudaMemcpyHostToDevice);
-  printf("line 177\n");
   
   // Configure and launch kernel.
   int threadsPerBlock = 256;
   int numBlocks = 1;
   size_t shared_mem_size = 8 * 9 + 9; // For T and A.
-  printf("about to call kernel\n");
+
   kernel_eight_point_minimal<<<numBlocks, threadsPerBlock, sizeof(float) * shared_mem_size>>>(pts1_dev, pts2_dev, M, output_F_dev);
-  printf("finished calling kernel\n");
 
   // Copy output device to host.
   output_F.resize(9);
@@ -461,6 +457,10 @@ __global__ void ransac_kernel(
 
   int tid = threadIdx.x;
   int bid = blockIdx.x;
+
+  if (tid == 0) {
+    s_block_inliers = 0;
+  }
  
   // T0 randomly generates the 8 points for the algo.
   if (tid == 0) {
@@ -505,6 +505,7 @@ __global__ void ransac_kernel(
 
   // Compute epipolar dist for all point pairs.
   int local_inlier_cnt = device_compute_symmetric_epipolar_dist(s_F, pts1, pts2, num_points, threshold);
+  
   atomicAdd(&s_block_inliers, local_inlier_cnt); 
 
   __syncthreads();
@@ -512,7 +513,6 @@ __global__ void ransac_kernel(
   // Write output.
   if (tid == 0) {
     out_inlier_counts[bid] = s_block_inliers;
-    printf("block id %d tid %d writing inlier count %d\n", bid, tid, s_block_inliers);
     for (int i = 0 ; i < 9 ; i++) {
       out_fund_matrix[bid * 9 + i] = s_F[i];
     }
@@ -542,7 +542,7 @@ void cuda_ransac(const std::vector<float> &pts1, const std::vector<float> &pts2,
 
   // Initialize cudaRand state for each block in the RANSAC algo.
   int init_rng_num_blocks = (num_iters + 255) / 256;
-  init_rng<<<init_rng_num_blocks, num_iters>>>(rand_states_dev, /* seed= */ 0, num_iters);
+  init_rng<<<init_rng_num_blocks, 256>>>(rand_states_dev, /* seed= */ 0, num_iters);
   cudaDeviceSynchronize();
 
   // Run ransac algorithm.
