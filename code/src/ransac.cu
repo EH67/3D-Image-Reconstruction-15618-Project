@@ -538,7 +538,37 @@ void cuda_ransac(const std::vector<float> &pts1, const std::vector<float> &pts2,
   cudaMemcpy(pts2_dev, pts2.data(), pts_size, cudaMemcpyHostToDevice);
 
   // Initialize cudaRand state for each block in the RANSAC algo.
-  // init_rng<<<1, num_iters>>>()
+  int init_rng_num_blocks = (num_iters + 255) / 256;
+  init_rng<<<init_rng_num_blocks, num_iters>>>(rand_states_dev, /* seed= */ 0, num_iters);
+  cudaDeviceSynchronize();
 
+  // Run ransac algorithm.
+  ransac_kernel<<<num_iters, 256>>>(
+    pts1_dev, pts2_dev, pts1.size(), M, 
+    num_iters, threshold, rand_states_dev, 
+    out_fund_matrix_dev, out_inlier_counts_dev
+  );
+  cudaDeviceSynchronize();
 
+  // Copy results from device to host.
+  std::vector<int> inlier_counts;
+  std::vector<float> fund_matrices;
+  cudaMemcpy(inlier_counts.data(), out_inlier_counts_dev, output_inlier_cnt_size, cudaMemcpyDeviceToHost);
+  cudaMemcpy(fund_matrices.data(), out_fund_matrix_dev, output_F_size, cudaMemcpyDeviceToHost);
+
+  // Find fundamental matrix with max inlier count and populate output.
+  auto max_iter = std::max_element(inlier_counts.begin(), inlier_counts.end());
+  int best_idx = std::distance(inlier_counts.begin(), max_iter);
+  int best_count = *max_iter;
+  printf("Max inliers: %d\n", best_count);
+  output_F.reserve(9);
+  for (int i = 0 ; i < 9 ; i++) {
+    output_F[i] = fund_matrices[best_idx * 9 + i];
+  }
+
+  cudaFree(pts1_dev);
+  cudaFree(pts2_dev);
+  cudaFree(out_fund_matrix_dev);
+  cudaFree(out_inlier_counts_dev);
+  cudaFree(rand_states_dev);
 }
