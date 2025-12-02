@@ -1,3 +1,5 @@
+# Completely Serial RANSAC Algorithm.
+
 import numpy as np
 import scipy
 import time
