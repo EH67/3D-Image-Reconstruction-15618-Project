@@ -56,14 +56,14 @@ def ransac_fundamental_matrix(pts1, pts2, M, num_iterations=1000, threshold=3.0)
 
     # 6. Final Refinement (Optional but recommended, using all inliers)
     # Use only the best inliers to run the full eightpoint algorithm once
-    if max_inliers > MIN_SAMPLE_SIZE:
-        final_F = eightpoint(pts1[best_mask], pts2[best_mask], M)
-    else:
-        final_F = best_F
+    # if max_inliers > MIN_SAMPLE_SIZE:
+    #     final_F = eightpoint(pts1[best_mask], pts2[best_mask], M)
+    # else:
+    #     final_F = best_F
     
     end = time.time()
     print("Ransac time: ", end-start)
-    return final_F, best_mask.astype(np.uint8)
+    return best_F, best_mask.astype(np.uint8)
 
 
 def eightpoint_minimal(pts1, pts2, M):

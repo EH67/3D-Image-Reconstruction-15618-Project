@@ -512,13 +512,14 @@ __global__ void ransac_kernel(
   // Write output.
   if (tid == 0) {
     out_inlier_counts[bid] = s_block_inliers;
+    printf("block id %d tid %d writing inlier count %d\n", bid, tid, s_block_inliers);
     for (int i = 0 ; i < 9 ; i++) {
       out_fund_matrix[bid * 9 + i] = s_F[i];
     }
   }
 }
 
-void cuda_ransac(const std::vector<float> &pts1, const std::vector<float> &pts2, const size_t M, std::vector<float>& output_F, int num_iters, float threshold) {
+void cuda_ransac(const std::vector<float> &pts1, const std::vector<float> &pts2, const size_t M, std::vector<float>& output_F, int num_iters, float threshold) {  
   float *pts1_dev, *pts2_dev, *out_fund_matrix_dev;
   int *out_inlier_counts_dev;
   curandState *rand_states_dev;
@@ -526,6 +527,8 @@ void cuda_ransac(const std::vector<float> &pts1, const std::vector<float> &pts2,
   size_t output_F_size = 9 * num_iters * sizeof(float);
   size_t output_inlier_cnt_size = num_iters * sizeof(int);
   size_t rand_states_size = num_iters * sizeof(curandState);
+
+  int num_points = pts1.size() / 2;
 
   cudaMalloc((void**)&pts1_dev, pts_size);
   cudaMalloc((void**)&pts2_dev, pts_size);
@@ -544,15 +547,15 @@ void cuda_ransac(const std::vector<float> &pts1, const std::vector<float> &pts2,
 
   // Run ransac algorithm.
   ransac_kernel<<<num_iters, 256>>>(
-    pts1_dev, pts2_dev, pts1.size(), M, 
+    pts1_dev, pts2_dev, num_points, M, 
     num_iters, threshold, rand_states_dev, 
     out_fund_matrix_dev, out_inlier_counts_dev
   );
   cudaDeviceSynchronize();
 
   // Copy results from device to host.
-  std::vector<int> inlier_counts;
-  std::vector<float> fund_matrices;
+  std::vector<int> inlier_counts(num_iters);
+  std::vector<float> fund_matrices(num_iters * 9);
   cudaMemcpy(inlier_counts.data(), out_inlier_counts_dev, output_inlier_cnt_size, cudaMemcpyDeviceToHost);
   cudaMemcpy(fund_matrices.data(), out_fund_matrix_dev, output_F_size, cudaMemcpyDeviceToHost);
 
