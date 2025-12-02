@@ -45,7 +45,7 @@ def ransac_fundamental_matrix(pts1, pts2, M, num_iterations=1000, threshold=3.0)
 
         # 4. Consensus Check
         # Find inliers: points whose error is less than the threshold
-        current_mask = errors < threshold
+        current_mask = errors < (threshold ** 2)
         current_inliers_count = np.sum(current_mask)
 
         # 5. Model Update

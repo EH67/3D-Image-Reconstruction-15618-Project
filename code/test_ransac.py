@@ -41,7 +41,7 @@ def count_inliers(F, pts1, pts2, threshold):
     denom1[denom1 < 1e-10] = 1e-10
     
     errors = (numerator**2 / denom2) + (numerator**2 / denom1)
-    return np.sum(errors < threshold)
+    return np.sum(errors < threshold ** 2)
 
 # --- 3. Test Execution ---
 

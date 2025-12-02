@@ -48,7 +48,7 @@ __device__ int device_compute_symmetric_epipolar_dist(const float* s_F, const fl
 
     // Compute final epipolar dist.
     float err = (numerator_squared / denom2) + (numerator_squared / denom1);
-    if (err < threshold) {
+    if (err < threshold * threshold) {
       local_count++;
     }
   }
