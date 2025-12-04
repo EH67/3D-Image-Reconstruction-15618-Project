@@ -19,126 +19,110 @@ import cuda_ransac_module
 
 NUM_ITERS = 5000
 THRESHOLD = 3.0
-
-def get_correspondences_cpu(img1, img2, M, num_iters=NUM_ITERS, threshold=THRESHOLD):
-    #feature matching
+def extract_features(img):
+    """
+    Detects features and computes descriptors using SIFT.
+    Returns: kp, des
+    """
     sift = cv2.SIFT_create()
+    kp, des = sift.detectAndCompute(img, None)
+    return kp, des
 
-    kp1, des1 = sift.detectAndCompute(img1, None)
-    kp2, des2 = sift.detectAndCompute(img2, None)
-
+def compute_matches(des1, des2):
+    """
+    Computes KNN matches using FLANN.
+    Returns: matches (list of DMatch objects)
+    """
     FLANN_INDEX_KDTREE = 1
     index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
     search_params = dict(checks=50)
 
-    #knn matching using FLANN
     flann = cv2.FlannBasedMatcher(index_params, search_params)
     matches = flann.knnMatch(des1, des2, k=2)
+    return matches
 
-    good_matches = []
+def filter_matches(matches, kp1, kp2, ratio=0.8):
+    """
+    Filters matches using the ratio test.
+    Returns: pts1, pts2 (Nx2 numpy arrays of matching points)
+    """
     pts1_candidates = []
     pts2_candidates = []
 
-    #ratio testing: ensuring best point is significantly different from second best
     for m, n in matches:
-        if m.distance < 0.8 * n.distance:
-            good_matches.append(m)
-
+        if m.distance < ratio * n.distance:
             pts1_candidates.append(kp1[m.queryIdx].pt)
             pts2_candidates.append(kp2[m.trainIdx].pt)
 
-    pts1_candidates = np.float32(pts1_candidates)
-    pts2_candidates = np.float32(pts2_candidates)
+    pts1 = np.float32(pts1_candidates)
+    pts2 = np.float32(pts2_candidates)
+    
+    return pts1, pts2
 
-    print(f"Found {len(pts1_candidates)} raw matches after Ratio Test.")
-    if len(pts1_candidates) < 8:
-        print("Not enough matches to compute fundamental matrix Using 8 point algorithm.")
-        return None, None, None
+def run_ransac_cpu(pts1, pts2, M, num_iters, threshold):
+    """
+    Executes RANSAC using the CPU Python implementation.
+    Returns: F, mask (boolean array)
+    """
+    F, mask = ransac_fundamental_matrix(pts1, pts2, M, num_iters, threshold)
+    mask = mask.astype(bool)
+    return F, mask
 
-  #ransac
-    F, mask = cv2.findFundamentalMat(pts1_candidates, pts2_candidates, cv2.FM_RANSAC, threshold, 0.99)
-    F_2, mask_2 = ransac_fundamental_matrix(pts1_candidates, pts2_candidates, M, num_iters, threshold)
-    print("F", F.shape)
-    print(F)
-    print("F_2", F_2.shape)
-    print(F_2)
-
-
-    #only use inliers
-    pts1 = pts1_candidates[mask_2 == 1]
-    pts2 = pts2_candidates[mask_2 == 1]
-    print("pts1.shape", pts1.shape, "pts2.shape", pts2.shape, "mask_2.shape", mask_2.shape)
-
-    inlier_matches_vis_new = []
-    for i, match in enumerate(good_matches):
-        if mask_2[i]:
-            inlier_matches_vis_new.append(match)
-
-    # visualize_inliers(im1, kp1, im2, kp2, inlier_matches_vis)
-
-    #   return pts1, pts2, F
-    return pts1, pts2, F_2
-
-
-
-def get_correspondences_gpu(img1, img2, M, num_iters=NUM_ITERS, threshold=THRESHOLD):
-    #feature matching (serial)
-    sift = cv2.SIFT_create()
-
-    kp1, des1 = sift.detectAndCompute(img1, None)
-    kp2, des2 = sift.detectAndCompute(img2, None)
-
-    FLANN_INDEX_KDTREE = 1
-    index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
-    search_params = dict(checks=50)
-
-    #knn matching using FLANN
-    flann = cv2.FlannBasedMatcher(index_params, search_params)
-    matches = flann.knnMatch(des1, des2, k=2)
-
-    good_matches = []
-    pts1_candidates = []
-    pts2_candidates = []
-
-    #ratio testing: ensuring best point is significantly different from second best
-    for m, n in matches:
-        if m.distance < 0.8 * n.distance:
-            good_matches.append(m)
-
-            pts1_candidates.append(kp1[m.queryIdx].pt)
-            pts2_candidates.append(kp2[m.trainIdx].pt)
-
-    pts1_candidates = np.float32(pts1_candidates)
-    pts2_candidates = np.float32(pts2_candidates)
-    N = pts1_candidates.shape[0]
-
-    print(f"Found {len(pts1_candidates)} raw matches after Ratio Test.")
-    if len(pts1_candidates) < 8:
-        print("Not enough matches to compute fundamental matrix Using 8 point algorithm.")
-        return None, None, None
-
-    #ransac (parallel).
-    F = cuda_ransac_module.cuda_ransac(pts1_candidates, pts2_candidates, int(M), num_iters, threshold)
-    print("cuda F", F)
-
-    # Get inlier mask (sequential). #TODO make this parallel
-    hpts1 = np.concatenate([pts1_candidates, np.ones([N, 1])], axis=1) # Nx3
-    hpts2 = np.concatenate([pts2_candidates, np.ones([N, 1])], axis=1) # Nx3
+def run_ransac_gpu(pts1, pts2, M, num_iters, threshold):
+    """
+    Executes RANSAC using the CUDA implementation.
+    Returns: F, mask (boolean array)
+    """
+    F = cuda_ransac_module.cuda_ransac(pts1, pts2, int(M), num_iters, threshold)
+    
+    # Compute Mask (Sequential calculation of error)
+    N = pts1.shape[0]
+    hpts1 = np.concatenate([pts1, np.ones([N, 1])], axis=1) # Nx3
+    hpts2 = np.concatenate([pts2, np.ones([N, 1])], axis=1) # Nx3
+    
     errors = compute_symmetric_epipolar_distance(F, hpts1, hpts2)
     mask = errors < THRESHOLD ** 2
+    
+    return F, mask
 
+def _process_correspondences(img1, img2, M, ransac_func, num_iters, threshold):
+    """
+    Generic pipeline that accepts a specific RANSAC function.
+    """
+    # 1. Feature Extraction
+    kp1, des1 = extract_features(img1)
+    kp2, des2 = extract_features(img2)
 
-    #only use inliers. # TODO combine with above.
-    pts1 = pts1_candidates[mask == 1]
-    pts2 = pts2_candidates[mask == 1]
-    print("pts1.shape", pts1.shape, "pts2.shape", pts2.shape, "mask_2.shape", mask.shape)
+    # 2. Matching (Split steps)
+    matches = compute_matches(des1, des2)
+    pts1_cand, pts2_cand = filter_matches(matches, kp1, kp2)
 
-    inlier_matches = []
-    for i, match in enumerate(good_matches):
-        if mask[i]:
-            inlier_matches.append(match)
+    print(f"Found {len(pts1_cand)} raw matches after Ratio Test.")
 
-    # visualize_inliers(im1, kp1, im2, kp2, inlier_matches)
+    if len(pts1_cand) < 8:
+        print("Not enough matches to compute fundamental matrix (Need >= 8).")
+        return None, None, None
 
-    #   return pts1, pts2, F
-    return pts1, pts2, F
+    # 3. RANSAC
+    F, mask = ransac_func(pts1_cand, pts2_cand, M, num_iters, threshold)
+
+    if F is None:
+        print("RANSAC failed to find a Fundamental Matrix.")
+        return None, None, None
+
+    # 4. Filter Inliers
+    mask = mask.ravel() 
+    pts1_inliers = pts1_cand[mask]
+    pts2_inliers = pts2_cand[mask]
+
+    print(f"Inliers: {len(pts1_inliers)} / {len(pts1_cand)}")
+    
+    return pts1_inliers, pts2_inliers, F
+
+# --- Main Callable Functions ---
+
+def get_correspondences_cpu(img1, img2, M, num_iters=NUM_ITERS, threshold=THRESHOLD):
+    return _process_correspondences(img1, img2, M, run_ransac_cpu, num_iters, threshold)
+
+def get_correspondences_gpu(img1, img2, M, num_iters=NUM_ITERS, threshold=THRESHOLD):
+    return _process_correspondences(img1, img2, M, run_ransac_gpu, num_iters, threshold)
