@@ -67,7 +67,7 @@ def generate_synthetic_data(n_points=1000):
 
 if __name__ == "__main__":
     
-    N_POINTS = 1000 # High number to stress test GPU vs CPU
+    N_POINTS = 1000 
     print(f"Generating synthetic data with {N_POINTS} points...")
     pts1, pts2, F, intrinsics, gt_3d, gt_M2 = generate_synthetic_data(N_POINTS)
     
