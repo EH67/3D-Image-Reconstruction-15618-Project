@@ -91,14 +91,14 @@ def run_correctness_test():
 
     # 3. CUDA Warp
     try:
-        F_cuda_warp = cuda_ransac_warp_module.cuda_ransac_warp(pts1_raw, pts2_raw, int(M), NUM_ITERS, THRESHOLD)
+        F_cuda_warp, mask = cuda_ransac_warp_module.cuda_ransac_warp(pts1_raw, pts2_raw, int(M), NUM_ITERS, THRESHOLD)
         print("F cuda warp", F_cuda_warp)
     except AttributeError:
         print("CUDA Warp function not found. Did you bind 'cuda_ransac_warp' in bindings.cpp?")
-        F_cuda_warp = None
+        F_cuda_warp, mask = None, None
     except Exception as e:
         print(f"CUDA Warp Failed: {e}")
-        F_cuda_warp = None
+        F_cuda_warp, mask = None, None
 
     # --- Analysis ---
     print(f"{'Implementation':<20} | {'Inliers':<10} | {'F Matrix Check'}")
@@ -116,7 +116,10 @@ def run_correctness_test():
     
     # Check Warp
     if F_cuda_warp is not None:
+        
         inliers_warp = count_inliers(F_cuda_warp, pts1_raw, pts2_raw, THRESHOLD)
+        inliers_warp_from_mask = np.count_nonzero(mask)
+        print("inliers warp", inliers_warp, "inliers warp from mask", inliers_warp_from_mask)
         diff = np.min([np.max(np.abs(F_python - F_cuda_warp)), np.max(np.abs(F_python + F_cuda_warp))])
         print(f"{'CUDA (Warp)':<20} | {inliers_warp:<10} | Diff: {diff:.6f}")
 
@@ -180,9 +183,10 @@ def run_benchmark():
         cuda_ransac_warp_module.cuda_ransac_warp(pts1[:8], pts2[:8], int(M), 1, THRESHOLD)
 
         start_warp = time.perf_counter()
-        F_warp = cuda_ransac_warp_module.cuda_ransac_warp(pts1, pts2, int(M), NUM_ITERS, THRESHOLD)
+        F_warp, mask = cuda_ransac_warp_module.cuda_ransac_warp(pts1, pts2, int(M), NUM_ITERS, THRESHOLD)
         time_warp = (time.perf_counter() - start_warp) * 1000.0
-        inliers_warp = count_inliers(F_warp, pts1, pts2, THRESHOLD)
+        # inliers_warp = count_inliers(F_warp, pts1, pts2, THRESHOLD)
+        inliers_warp = np.count_nonzero(mask)
         print(f"   -> Time: {time_warp:.2f} ms | Inliers: {inliers_warp}")
     except AttributeError:
         print("   -> 'cuda_ransac_warp' not found in module.")

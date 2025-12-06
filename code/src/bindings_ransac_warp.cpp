@@ -45,7 +45,7 @@ std::pair<py::array_t<float>, py::array_t<bool>> py_cuda_ransac_warp(py::array_t
   // 
   
   // Convert output F to numpy array
-    auto result_F = py::array_t<float>(9);
+    auto result_F = py::array_t<float>({3,3});
     py::buffer_info buf_result_F = result_F.request();
     float* ptr_result_F = static_cast<float*>(buf_result_F.ptr);
     for (size_t i = 0; i < 9; i++) {
