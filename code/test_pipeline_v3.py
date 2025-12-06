@@ -1,9 +1,12 @@
 import sys
 import os
 import numpy as np
+import cv2
 import time
 import random
 from src.ransac import ransac_fundamental_matrix
+from src.correspondence import extract_features, compute_matches, filter_matches, run_ransac_cpu, run_ransac_gpu,run_ransac_warp_gpu
+from src.find_M2 import findM2_cpu, findM2_gpu
 
 # --- 1. Setup Module Imports ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -12,6 +15,8 @@ sys.path.insert(0, build_dir)
 
 import cuda_ransac_module
 import cuda_ransac_warp_module
+
+EXPORT_OUTPUT = False
 
 # --- Helper for Verification ---
 def count_inliers(F, pts1, pts2, threshold):
@@ -174,6 +179,129 @@ def run_benchmark():
     if time_cuda < float('inf') and time_warp < float('inf'):
         print(f"Warp GPU vs Block GPU:    {time_cuda / time_warp:.2f}x faster")
 
+def run_image_pipeline_comparison():
+    print("\n" + "="*60)
+    print(" PART 3: FULL IMAGE PIPELINE (RANSAC + FindM2 + Triangulation)")
+    print("="*60)
+
+    # Load Images
+    IMAGE_DIR = os.path.abspath(os.path.join(current_dir, 'images'))
+    IM1_PATH = os.path.join(IMAGE_DIR, 'bag3.jpg')
+    IM2_PATH = os.path.join(IMAGE_DIR, 'bag4.jpg')
+
+    im1 = cv2.imread(IM1_PATH)
+    im2 = cv2.imread(IM2_PATH)
+    if im1 is None or im2 is None:
+        print("Error: Could not load images.")
+        return
+
+    # Convert to RGB for export
+    im1_rgb = cv2.cvtColor(im1, cv2.COLOR_BGR2RGB)
+    im2_rgb = cv2.cvtColor(im2, cv2.COLOR_BGR2RGB)
+
+    h, w, _ = im1.shape
+    M_scale = np.max([w, h])
+    
+    # Mock Intrinsics
+    focal_length = w * 1.2
+    cx, cy = w / 2.0, h / 2.0
+    K_mock = np.array([[focal_length, 0, cx], [0, focal_length, cy], [0, 0, 1]])
+    intrinsics = {'K1': K_mock, 'K2': K_mock}
+
+    # --- Pre-processing ---
+    print("[Common] Feature Extraction & Matching...")
+    kp1, des1 = extract_features(im1)
+    kp2, des2 = extract_features(im2)
+    matches_raw = compute_matches(des1, des2)
+    pts1_cand, pts2_cand = filter_matches(matches_raw, kp1, kp2)
+    print(f"   Matches: {len(pts1_cand)}")
+    
+    if len(pts1_cand) < 8: return
+
+    NUM_ITERS = 5000
+    THRESHOLD = 3.0
+
+    # --- 1. CPU Pipeline ---
+    print("\n[CPU] Running Pipeline...")
+    start_cpu = time.perf_counter()
+    F_cpu, mask_cpu = run_ransac_cpu(pts1_cand, pts2_cand, M_scale, NUM_ITERS, THRESHOLD)
+    t_ransac_cpu = time.perf_counter()
+    
+    mask_cpu = mask_cpu.ravel().astype(bool)
+    pts1_in = pts1_cand[mask_cpu]
+    pts2_in = pts2_cand[mask_cpu]
+    
+    if F_cpu is not None:
+        M2_cpu, C2_cpu, P_cpu = findM2_cpu(F_cpu, pts1_in, pts2_in, intrinsics)
+    else:
+        P_cpu = None
+    t_total_cpu = time.perf_counter() - start_cpu
+    print(f"   Total Time: {t_total_cpu:.4f}s | RANSAC: {t_ransac_cpu - start_cpu:.4f}s")
+
+    # --- 2. GPU Block Pipeline ---
+    print("\n[GPU Block] Running Pipeline...")
+    start_gpu = time.perf_counter()
+    try:
+        F_block, mask_gpu_block = run_ransac_gpu(pts1_cand, pts2_cand, int(M_scale), NUM_ITERS, THRESHOLD)
+        t_ransac_block = time.perf_counter()
+        
+        # Apply mask
+        mask_gpu_block = mask_gpu_block.ravel().astype(bool)
+        pts1_in_blk = pts1_cand[mask_gpu_block]
+        pts2_in_blk = pts2_cand[mask_gpu_block]
+
+        if F_block is not None:
+            M2_block, C2_block, P_block = findM2_gpu(F_block, pts1_in_blk, pts2_in_blk, intrinsics)
+        else:
+            P_block = None
+        
+        
+        t_total_block = time.perf_counter() - start_gpu
+        print(f"   Total Time: {t_total_block:.4f}s | RANSAC: {t_ransac_block - start_gpu:.4f}s")
+        print(f"   Speedup vs CPU: {t_total_cpu / t_total_block:.2f}x")
+    except Exception as e:
+        print(f"   Failed: {e}")
+        P_block = None
+
+    # --- 3. GPU Warp Pipeline ---
+    print("\n[GPU Warp] Running Pipeline...")
+    start_warp = time.perf_counter()
+    try:
+        F_warp, mask_gpu_warp = run_ransac_warp_gpu(pts1_cand, pts2_cand, int(M_scale), NUM_ITERS, THRESHOLD)
+        t_ransac_warp = time.perf_counter()
+        
+        # Apply mask.
+        mask_gpu_warp = mask_gpu_warp.ravel().astype(bool)
+        pts1_in_warp = pts1_cand[mask_gpu_warp]
+        pts2_in_warp = pts2_cand[mask_gpu_warp]
+        
+        if F_warp is not None:
+            M2_warp, C2_warp, P_warp = findM2_gpu(F_warp, pts1_in_warp, pts2_in_warp, intrinsics)
+        else:
+            P_warp = None
+            
+        t_total_warp = time.perf_counter() - start_warp
+        print(f"   Total Time: {t_total_warp:.4f}s | RANSAC: {t_ransac_warp - start_warp:.4f}s")
+        print(f"   Speedup vs CPU:   {t_total_cpu / t_total_warp:.2f}x")
+        if P_block is not None:
+             print(f"   Speedup vs Block: {t_total_block / t_total_warp:.2f}x")
+             
+    except Exception as e:
+        print(f"   Failed: {e}")
+        P_warp = None
+
+    # --- Export ---
+    if EXPORT_OUTPUT:
+        print("\nExporting .npz results...")
+        if P_cpu is not None:
+            export_visualization_data("results_cpu.npz", im1_rgb, im2_rgb, pts1_in, pts2_in, P_cpu)
+        if P_block is not None:
+            export_visualization_data("results_gpu_block.npz", im1_rgb, im2_rgb, pts1_in_blk, pts2_in_blk, P_block)
+        if P_warp is not None:
+            export_visualization_data("results_gpu_warp.npz", im1_rgb, im2_rgb, pts1_in_warp, pts2_in_warp, P_warp)
+
+
 if __name__ == "__main__":
     run_correctness_test()
     run_benchmark()
+    run_image_pipeline_comparison()

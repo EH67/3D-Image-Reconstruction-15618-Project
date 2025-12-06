@@ -16,6 +16,7 @@ sys.path.insert(0, build_dir) # add path with /build to sys path.
 # Import any modules defined by PYBIND11_MODULE from src/bindings.cpp.
 import cuda_ops_module 
 import cuda_ransac_module
+import cuda_ransac_warp_module
 
 NUM_ITERS = 5000
 THRESHOLD = 3.0
@@ -77,6 +78,25 @@ def run_ransac_gpu(pts1, pts2, M, num_iters, threshold):
     """
     print("RANSAC GPU called for num_iters", num_iters, "threshold", threshold)
     F = cuda_ransac_module.cuda_ransac(pts1, pts2, int(M), num_iters, threshold)
+    
+    # Compute Mask (Sequential calculation of error)
+    N = pts1.shape[0]
+    hpts1 = np.concatenate([pts1, np.ones([N, 1])], axis=1) # Nx3
+    hpts2 = np.concatenate([pts2, np.ones([N, 1])], axis=1) # Nx3
+    
+    errors = compute_symmetric_epipolar_distance(F, hpts1, hpts2)
+    mask = errors < threshold ** 2
+    print(F)
+    
+    return F, mask
+
+def run_ransac_warp_gpu(pts1, pts2, M, num_iters, threshold):
+    """
+    Executes RANSAC using the CUDA Warp implementation.
+    Returns: F, mask (boolean array)
+    """
+    print("RANSAC Warp GPU called for num_iters", num_iters, "threshold", threshold)
+    F = cuda_ransac_warp_module.cuda_ransac_warp(pts1, pts2, int(M), num_iters, threshold)
     
     # Compute Mask (Sequential calculation of error)
     N = pts1.shape[0]
