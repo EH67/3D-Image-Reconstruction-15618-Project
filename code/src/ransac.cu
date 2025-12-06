@@ -6,6 +6,9 @@
 #include <iostream>
 #include <float.h>
 
+#define WARP_SIZE 32
+#define WARPS_PER_BLOCk 8
+
 __device__ float3 load_point(const float* pts, int ind) {
   float3 p;
   p.x = pts[ind * 2];
@@ -267,13 +270,16 @@ __device__ void singularize_3x3(float* F) {
 
 // s_A is [8*9] matrix in shared mem
 __device__ void device_eight_point_minimal(const float* pts1_dev, const float* pts2_dev, const size_t M, float* output_F_dev, float* s_A) {
-  int tid = threadIdx.x;
+  // int tid = threadIdx.x;
+
+  int warp_id = threadIdx.x / WARP_SIZE;
+  int lane_id = threadIdx.x % WARP_SIZE;
 
   float V[81];
 
   // First 8 threads for this block populates A matrix (1 thread per row).
   // Computes each of the eq given in np.stack() of the Python implementation.
-  if (tid < 8) {
+  if (lane_id < 8) {
     // Load x,y value of points needed for this row & normalize.
     float x1 = pts1_dev[tid * 2] / M;
     float y1 = pts1_dev[tid * 2 + 1] / M;
@@ -291,7 +297,7 @@ __device__ void device_eight_point_minimal(const float* pts1_dev, const float* p
     s_A[tid * 9 + 7] = y1;
     s_A[tid * 9 + 8] = 1.0f;
   }
-  __syncthreads();
+  __syncwarp();
 
   // if (tid == 0) {
   //   printf("CUDA A matrix: \n");
@@ -305,7 +311,7 @@ __device__ void device_eight_point_minimal(const float* pts1_dev, const float* p
   // }
   // __syncthreads();
 
-  if (tid == 0) {
+  if (lane_id == 0) {
     // _, _, Vh = np.linalg.svd(A)
     svd_jacobi_generic<8, 9, 15>(s_A, V);
 
@@ -327,6 +333,7 @@ __device__ void device_eight_point_minimal(const float* pts1_dev, const float* p
     float scale = (fabsf(f[8]) > 1e-10f) ? (1.0f / f[8]) : 1.0f;
     for(int i=0; i<9; i++) output_F_dev[i] = f[i] * scale;
   }
+  __syncwarp();
 }
 
 // TODO: ONLY USED FOR TESTING, use device_eight_point_minimal for the actual pipeline.
@@ -446,24 +453,30 @@ __global__ void ransac_kernel(
   int* out_inlier_counts // [num_iters] dim, inlier count for each block
 ) {
   // Points for eight point algo.
-  __shared__ float s_pts1[8 * 2];
-  __shared__ float s_pts2[8 * 2];
+  __shared__ float s_pts1[WARPS_PER_BLOCK][8 * 2];
+  __shared__ float s_pts2[WARPS_PER_BLOCK][8 * 2];
   // Fundamental matrix for this block.
-  __shared__ float s_F[9];
+  __shared__ float s_F[WARPS_PER_BLOCK][9];
   // Used for reduction of inliers.
-  __shared__ int s_block_inliers;
+  // __shared__ int s_block_inliers;
   // Used during eight point algo.
-  __shared__ float s_A[72]; // shape 8*9
+  __shared__ float s_A[WARPS_PER_BLOCK][72]; // shape 8*9
 
-  int tid = threadIdx.x;
-  int bid = blockIdx.x;
+  // int tid = threadIdx.x;
+  // int bid = blockIdx.x;
+  int warp_id = threadIdx.x / WARP_SIZE;
+  int lane_id = threadIdx.x % WARP_SIZE;
+  int iter_idx = blockIdx.x * WARPS_PER_BLOCK + warp_id;
+    
+  if (iter_idx >= num_iters) return;
+
 
   if (tid == 0) {
     s_block_inliers = 0;
   }
  
   // T0 randomly generates the 8 points for the algo.
-  if (tid == 0) {
+  if (lane_id == 0) {
     curandState local_state = global_states[bid];
 
     // Pick 8 unique points.
