@@ -57,7 +57,6 @@ __device__ int device_compute_symmetric_epipolar_dist(const float* s_F, const fl
 
     // Compute final epipolar dist.
     float err = (numerator_squared / denom2) + (numerator_squared / denom1);
-    printf("idx %d err %f\n", idx, err);
     if (err < threshold * threshold) {
       local_count++;
     }
@@ -196,10 +195,10 @@ __device__ void device_eight_point_minimal(const float* pts1_dev, const float* p
   // Computes each of the eq given in np.stack() of the Python implementation.
   if (LANE_ID < 8) {
     // Load x,y value of points needed for this row & normalize.
-    float x1 = pts1_dev[ITER_IDX * 2] / M;
-    float y1 = pts1_dev[ITER_IDX * 2 + 1] / M;
-    float x2 = pts2_dev[ITER_IDX * 2] / M;
-    float y2 = pts2_dev[ITER_IDX * 2 + 1] / M;
+    float x1 = pts1_dev[LANE_ID * 2] / M;
+    float y1 = pts1_dev[LANE_ID * 2 + 1] / M;
+    float x2 = pts2_dev[LANE_ID * 2] / M;
+    float y2 = pts2_dev[LANE_ID * 2 + 1] / M;
 
     // Populate a row for the A matrix.
     s_A[LANE_ID * 9 + 0] = x2 * x1;
@@ -326,7 +325,6 @@ __global__ void ransac_warp_kernel(
 
   // Compute epipolar dist for all point pairs.
   int local_inlier_cnt = device_compute_symmetric_epipolar_dist(s_F[WARP_ID], pts1, pts2, num_points, threshold);
-  printf("Before for loop local inlier count %d\n", local_inlier_cnt);
   __syncwarp();
 
   // Reduce and add all counts (at the end lane 0 has the reduced sum).
@@ -339,7 +337,6 @@ __global__ void ransac_warp_kernel(
 
   // Write output.
   if (LANE_ID == 0) {
-    printf("after accumulation, local inlier cnt is %d\n\n\n\n", local_inlier_cnt);
     out_inlier_counts[ITER_IDX] = local_inlier_cnt;
     for (int i = 0 ; i < 9 ; i++) {
       out_fund_matrix[ITER_IDX * 9 + i] = s_F[WARP_ID][i];
@@ -373,7 +370,6 @@ void cuda_ransac_warp(const std::vector<float> &pts1, const std::vector<float> &
   init_rng<<<init_rng_num_blocks, 256>>>(rand_states_dev, /* seed= */ 0, num_iters);
   cudaDeviceSynchronize();
 
-  int threads_per_block = 256;
   int num_blocks = (num_iters + WARPS_PER_BLOCK - 1) / WARPS_PER_BLOCK;
 
   // Run ransac algorithm.
