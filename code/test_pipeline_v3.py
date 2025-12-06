@@ -17,6 +17,7 @@ import cuda_ransac_module
 import cuda_ransac_warp_module
 
 EXPORT_OUTPUT = True
+RESIZE = False
 
 def export_visualization_data(filename, img1, img2, pts1, pts2, P):
     """
@@ -39,6 +40,19 @@ def export_visualization_data(filename, img1, img2, pts1, pts2, P):
         P=P
     )
     print("Export complete.")
+
+#resize function to reduce number of pixels to run correspondence on
+def resize_with_aspect_ratio(image, width=None, height=None, inter=cv2.INTER_AREA):
+    dim = None
+    (h, w) = image.shape[:2]
+    if width is None and height is None: return image
+    if width is None:
+        r = height / float(h)
+        dim = (int(w * r), height)
+    else:
+        r = width / float(w)
+        dim = (width, int(h * r))
+    return cv2.resize(image, dim, interpolation=inter)
 
 # --- Helper for Verification ---
 def count_inliers(F, pts1, pts2, threshold):
@@ -213,6 +227,10 @@ def run_image_pipeline_comparison():
 
     im1 = cv2.imread(IM1_PATH)
     im2 = cv2.imread(IM2_PATH)
+    if RESIZE:
+      im1 = resize_with_aspect_ratio(im1, width=1200)
+      im2 = resize_with_aspect_ratio(im2, width=1200)
+      
     if im1 is None or im2 is None:
         print("Error: Could not load images.")
         return
