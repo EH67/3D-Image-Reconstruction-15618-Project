@@ -16,7 +16,29 @@ sys.path.insert(0, build_dir)
 import cuda_ransac_module
 import cuda_ransac_warp_module
 
-EXPORT_OUTPUT = False
+EXPORT_OUTPUT = True
+
+def export_visualization_data(filename, img1, img2, pts1, pts2, P):
+    """
+    Saves images, inlier coordinates, and 3D points to a .npz file.
+    """
+    print(f"Exporting data to {filename}...")
+    # Ensure points are numpy arrays
+    pts1 = np.array(pts1)
+    pts2 = np.array(pts2)
+    if P is None:
+        P = np.array([])
+    
+    # Save compressed to save space
+    np.savez_compressed(
+        filename,
+        img1=img1,
+        img2=img2,
+        pts1=pts1,
+        pts2=pts2,
+        P=P
+    )
+    print("Export complete.")
 
 # --- Helper for Verification ---
 def count_inliers(F, pts1, pts2, threshold):
