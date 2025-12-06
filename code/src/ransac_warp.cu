@@ -66,6 +66,46 @@ __device__ int device_compute_symmetric_epipolar_dist(const float* s_F, const fl
 }
 
 
+// Stores the mask result in output_mask.
+__global__ void kernel_compute_inlier_mask(const float* s_F, const float* hpts1_dev, const float* hpts2_dev, int N, float threshold, uint8_t* output_mask) {
+  // int idx = threadIdx.x;
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (idx >= N) { return; }
+
+  // Get the point for image 1 and 2 this thread is in charge of.
+  float3 p1 = load_point(hpts1_dev, idx);
+  float3 p2 = load_point(hpts2_dev, idx);
+
+  // Get Epipolar Lines l2 = F * p1.
+  // l2 = [a, b, c] where ax + by + c = 0
+  float3 l2;
+  l2.x = s_F[0] * p1.x + s_F[1] * p1.y + s_F[2] * p1.z;
+  l2.y = s_F[3] * p1.x + s_F[4] * p1.y + s_F[5] * p1.z;
+  l2.z = s_F[6] * p1.x + s_F[7] * p1.y + s_F[8] * p1.z;
+
+  // Get Epipolar Lines l1 = F.T * p2.
+  float3 l1;
+  l1.x = s_F[0] * p2.x + s_F[3] * p2.y + s_F[6] * p2.z;
+  l1.y = s_F[1] * p2.x + s_F[4] * p2.y + s_F[7] * p2.z;
+  l1.z = s_F[2] * p2.x + s_F[5] * p2.y + s_F[8] * p2.z;
+
+  // Get numerator (epipolar constraint).
+  // p2.T * F * p1, same as dot product of p2 and l2.
+  float numerator = p2.x * l2.x + p2.y * l2.y + p2.z * l2.z;
+  float numerator_squared = numerator * numerator;
+
+  // Denom: squared norm of x and y of the lines.
+  float denom2 = l2.x * l2.x + l2.y * l2.y;
+  float denom1 = l1.x * l1.x + l1.y * l1.y;
+
+  // Compute final epipolar dist.
+  float err = (numerator_squared / denom2) + (numerator_squared / denom1);
+  output_mask[idx] = (err < threshold * threshold);
+
+}
+
+
 // ROWS: Number of rows in A
 // COLS: Number of columns in A (and rows/cols of V)
 // ITERS: Number of Jacobi sweeps 
@@ -240,7 +280,6 @@ __device__ void device_eight_point_minimal(const float* pts1_dev, const float* p
 }
 
 
-// NOTE: Call with diff dims than calling ransac - only need num_blocks # of threads.
 // Populates state array with the random state (will be used in ransac).
 __global__ void init_rng(curandState *state, unsigned long long seed, int num_blocks) {
     int id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -344,7 +383,7 @@ __global__ void ransac_warp_kernel(
   }
 }
 
-void cuda_ransac_warp(const std::vector<float> &pts1, const std::vector<float> &pts2, const size_t M, std::vector<float>& output_F, int num_iters, float threshold) {  
+void cuda_ransac_warp(const std::vector<float> &pts1, const std::vector<float> &pts2, const size_t M, std::vector<float>& output_F, std::vector<uint8_t>& output_mask, int num_iters, float threshold) {  
   float *pts1_dev, *pts2_dev, *out_fund_matrix_dev;
   int *out_inlier_counts_dev;
   curandState *rand_states_dev;
@@ -396,9 +435,21 @@ void cuda_ransac_warp(const std::vector<float> &pts1, const std::vector<float> &
     output_F[i] = fund_matrices[best_idx * 9 + i];
   }
 
+  // Create final output mask.
+  size_t output_mask_size = num_points * sizeof(uint8_t);
+  uint8_t* output_mask_dev;
+  cudaMalloc((void**)&output_mask_dev, output_mask_size);
+  int numBlocksComputeMask = (num_points + 255) / 256;
+  kernel_compute_inlier_mask<<<numBlocksComputeMask, 256>>>(out_fund_matrix_dev + (best_idx * 9), pts1_dev, pts2_dev, num_points, threshold, output_mask_dev);
+
+  // Copy mask to host.
+  output_mask.reserve(num_points);
+  cudaMemcpy(output_mask.data(), output_mask_dev, output_mask_size, cudaMemcpyDeviceToHost);
+
   cudaFree(pts1_dev);
   cudaFree(pts2_dev);
   cudaFree(out_fund_matrix_dev);
   cudaFree(out_inlier_counts_dev);
   cudaFree(rand_states_dev);
+  cudaFree(output_mask_dev);
 }

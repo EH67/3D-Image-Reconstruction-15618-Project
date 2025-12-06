@@ -27,4 +27,13 @@ void cuda_eight_point_minimal(const std::vector<float>& pts1, const std::vector<
 * @param num_iters Number of iterations for RANSAC.
 * @param threshold Threshold for determining inliers.
 */
-void cuda_ransac_warp(const std::vector<float> &pts1, const std::vector<float> &pts2, const size_t M, std::vector<float>& output_F, int num_iters, float threshold);
+// void cuda_ransac_warp(const std::vector<float> &pts1, const std::vector<float> &pts2, const size_t M, std::vector<float>& output_F, int num_iters, float threshold);
+void cuda_ransac_warp(
+    const std::vector<float> &pts1, 
+    const std::vector<float> &pts2, 
+    const size_t M, 
+    std::vector<float>& output_F, 
+    std::vector<uint8_t>& output_mask, 
+    int num_iters, 
+    float threshold
+);
