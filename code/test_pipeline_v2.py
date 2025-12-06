@@ -12,7 +12,7 @@ sys.path.insert(0, current_dir)
 
 # --- Module Imports ---
 # Updated imports to use separated functions
-from src.correspondence import extract_features, compute_matches, filter_matches, run_ransac_cpu, run_ransac_gpu
+from src.correspondence import extract_features, compute_matches, filter_matches, run_ransac_cpu, run_ransac_gpu, run_ransac_warp_gpu
 
 try:
     from src.find_M2 import findM2_cpu, findM2_gpu
@@ -182,11 +182,13 @@ if __name__ == '__main__':
     print("-" * 60)
 
     # --- 4. GPU Pipeline (RANSAC + M2) ---
+    # Warmup
+    run_ransac_warp_gpu(pts1_cand[:8], pts2_cand[:8], M_scale, num_iters=5, threshold=3.0)
     print("[GPU] Starting Optimization (RANSAC + FindM2)...")
     start_gpu = time.perf_counter()
     
     # A. RANSAC
-    F_gpu, mask_gpu = run_ransac_gpu(pts1_cand, pts2_cand, M_scale, num_iters=5000, threshold=3.0)
+    F_gpu, mask_gpu = run_ransac_warp_gpu(pts1_cand, pts2_cand, M_scale, num_iters=5000, threshold=3.0)
     
     # Apply Mask
     mask_gpu = mask_gpu.ravel().astype(bool)
@@ -246,4 +248,4 @@ if __name__ == '__main__':
             export_visualization_data("results_cpu.npz", im1_rgb, im2_rgb, pts1_cpu_inliers, pts2_cpu_inliers, P_cpu)
         
         if P_gpu is not None:
-            export_visualization_data("results_gpu.npz", im1_rgb, im2_rgb, pts1_gpu_inliers, pts2_gpu_inliers, P_gpu)
+            export_visualization_data("results_gpu_warp.npz", im1_rgb, im2_rgb, pts1_gpu_inliers, pts2_gpu_inliers, P_gpu)
