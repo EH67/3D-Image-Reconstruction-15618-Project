@@ -60,6 +60,9 @@ def run_pipeline(mode, im1, im2, M, intrinsics):
     Runs the full pipeline (Correspondence + RANSAC + M2 + Triangulation)
     mode: 'cpu' or 'gpu'
     """
+    # Warmup
+    get_correspondences_gpu(im1, im2, M)
+
     print(f"[{mode.upper()}] Starting Pipeline...")
     start_time = time.perf_counter()
 
