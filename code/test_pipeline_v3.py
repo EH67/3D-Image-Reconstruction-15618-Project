@@ -15,10 +15,6 @@ import cuda_ransac_warp_module
 
 # --- Helper for Verification ---
 def count_inliers(F, pts1, pts2, threshold):
-    """
-    Python implementation of error checking to verify the QUALITY of the CUDA result.
-    We don't expect the F matrix to be identical, but it should explain the data equally well.
-    """
     if F is None: return 0
     N = pts1.shape[0]
     hpts1 = np.concatenate([pts1, np.ones([N, 1])], axis=1)
