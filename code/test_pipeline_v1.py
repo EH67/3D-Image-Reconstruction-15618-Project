@@ -85,6 +85,9 @@ def run_pipeline(mode, im1, im2, M, intrinsics):
     return F, M2, P, total_time
 
 if __name__ == '__main__':
+    cv2.setRNGSeed(0)
+    np.random.seed(0)
+
     # --- 1. Load Data ---
     IMAGE_DIR = os.path.abspath(os.path.join(current_dir, 'images'))
     IM1_PATH = os.path.join(IMAGE_DIR, 'bag3.jpg')

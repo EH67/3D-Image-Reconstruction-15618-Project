@@ -64,8 +64,10 @@ def run_ransac_cpu(pts1, pts2, M, num_iters, threshold):
     Executes RANSAC using the CPU Python implementation.
     Returns: F, mask (boolean array)
     """
+    print("RANSAC CPU called for num_iters", num_iters, "threshold", threshold)
     F, mask = ransac_fundamental_matrix(pts1, pts2, M, num_iters, threshold)
     mask = mask.astype(bool)
+    print(F)
     return F, mask
 
 def run_ransac_gpu(pts1, pts2, M, num_iters, threshold):
@@ -73,6 +75,7 @@ def run_ransac_gpu(pts1, pts2, M, num_iters, threshold):
     Executes RANSAC using the CUDA implementation.
     Returns: F, mask (boolean array)
     """
+    print("RANSAC GPU called for num_iters", num_iters, "threshold", threshold)
     F = cuda_ransac_module.cuda_ransac(pts1, pts2, int(M), num_iters, threshold)
     
     # Compute Mask (Sequential calculation of error)
@@ -81,7 +84,8 @@ def run_ransac_gpu(pts1, pts2, M, num_iters, threshold):
     hpts2 = np.concatenate([pts2, np.ones([N, 1])], axis=1) # Nx3
     
     errors = compute_symmetric_epipolar_distance(F, hpts1, hpts2)
-    mask = errors < THRESHOLD ** 2
+    mask = errors < threshold ** 2
+    print(F)
     
     return F, mask
 

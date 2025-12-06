@@ -66,6 +66,12 @@ pybind11_add_module(cuda_ransac_module
     src/ransac.cuh
 )
 
+pybind11_add_module(cuda_ransac_warp_module
+    src/bindings_ransac_warp.cpp
+    src/ransac_warp.cu
+    src/ransac_warp.cuh
+)
+
 # Link necessary libraries.
 target_link_libraries(cuda_ops_module 
     PRIVATE 
@@ -91,6 +97,14 @@ target_link_libraries(cuda_ransac_module
     # ${OpenCV_LIBS}
 )
 
+target_link_libraries(cuda_ransac_warp_module 
+    PRIVATE 
+    Python3::NumPy 
+    pybind11::module
+    cudart_static # Link against the CUDA Runtime library
+    # ${OpenCV_LIBS}
+)
+
 # Specify the dir of where to find the pybind11::module.
 target_link_directories(cuda_ops_module
     PRIVATE
@@ -101,6 +115,11 @@ target_link_directories(cuda_triangulation_module
     ${pybind11_LIBRARY_DIRS}
 )
 target_link_directories(cuda_ransac_module
+    PRIVATE
+    ${pybind11_LIBRARY_DIRS}
+)
+
+target_link_directories(cuda_ransac_warp_module
     PRIVATE
     ${pybind11_LIBRARY_DIRS}
 )

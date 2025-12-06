@@ -69,6 +69,9 @@ def compare_matrices_frobenius(M1, M2, name="Matrix"):
     return diff
 
 if __name__ == '__main__':
+    cv2.setRNGSeed(0)
+    np.random.seed(0)
+
     # --- 1. Load Data ---
     IMAGE_DIR = os.path.abspath(os.path.join(current_dir, 'images'))
     IM1_PATH = os.path.join(IMAGE_DIR, 'bag3.jpg')
@@ -135,7 +138,7 @@ if __name__ == '__main__':
     start_cpu = time.perf_counter()
     
     # A. RANSAC
-    F_cpu, mask_cpu = run_ransac_cpu(pts1_cand, pts2_cand, M_scale, num_iters=5000, threshold=3.0)
+    F_cpu, mask_cpu = run_ransac_cpu(pts1_cand.copy(), pts2_cand.copy(), M_scale, num_iters=5000, threshold=3.0)
     
     # Apply Mask
     mask_cpu = mask_cpu.ravel().astype(bool)
