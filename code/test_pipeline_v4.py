@@ -224,7 +224,8 @@ def run_image_pipeline():
 
     # --- Setup ---
     # Update this path to your exact folder on the GHC machine
-    IMAGE_DIR = '/afs/andrew.cmu.edu/usr11/myu2/private/15418/3D-Image-Reconstruction-15618-Project/code/images' 
+    # IMAGE_DIR = '/afs/andrew.cmu.edu/usr11/myu2/private/15418/3D-Image-Reconstruction-15618-Project/code/images' 
+    IMAGE_DIR = os.path.abspath(os.path.join(current_dir, 'images/Pokemon_Plush'))
     image_paths = sorted(glob.glob(os.path.join(IMAGE_DIR, '*.jpg')))
 
     if not image_paths:
@@ -385,7 +386,7 @@ if __name__ == "__main__":
     run_image_pipeline()
 
 
-if __name__ == "__main__":
-    run_correctness_test()
-    run_benchmark()
-    run_image_pipeline()
+# if __name__ == "__main__":
+#     run_correctness_test()
+#     run_benchmark()
+#     run_image_pipeline()
