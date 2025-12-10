@@ -1,3 +1,7 @@
+"""
+Benchmark for RANSAC - Returns speedup as we change # of points and # of iterations.
+"""
+
 import sys
 import os
 import numpy as np
@@ -106,7 +110,7 @@ def run_iter_scaling_benchmark():
     
     # --- Configuration ---
     # We will test these iteration counts
-    ITER_CONFIGS = [1000, 5000, 10000, 50000, 100000]
+    ITER_CONFIGS = [1000, 5000, 10000, 50000, 100000, 200000, 400000]
     
     M = 1000.0
     THRESHOLD = 5.0
@@ -143,7 +147,7 @@ def run_iter_scaling_benchmark():
         
         # 1. Python
         # Skip Python for very large iters if it takes too long (optional check)
-        if num_iters > 100000:
+        if num_iters > 10000000:
             t_py = -1.0 # Skip
         else:
             s = time.perf_counter()
@@ -190,7 +194,7 @@ def run_point_scaling_benchmark():
     print("="*80)
     
     # We test small to very large point clouds
-    POINT_CONFIGS = [1000, 5000, 10000, 50000, 100000, 200000]
+    POINT_CONFIGS = [1000, 5000, 10000, 50000, 100000, 200000, 400000]
     M = 1000.0
     THRESHOLD = 5.0
     NUM_ITERS = 5000

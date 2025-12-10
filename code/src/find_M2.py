@@ -231,7 +231,7 @@ def findM2_cpu(F, pts1, pts2, intrinsics):
 
     if best_M2 is None:
         print("  [DEBUG] findM2 failed: All 4 candidates failed triangulation or check.")
-    print(i)
+    # print(i)
     return best_M2, best_C2, best_P
 
 
@@ -289,5 +289,5 @@ def findM2_gpu(F, pts1, pts2, intrinsics):
 
     if best_M2 is None:
         print("  [DEBUG] findM2 failed: All 4 candidates failed triangulation or check.")
-    print(i)
+    # print(i)
     return best_M2, best_C2, best_P

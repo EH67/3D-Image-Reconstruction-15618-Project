@@ -1,3 +1,13 @@
+"""
+DEPRECATED - DO NOT USE, ONLY HERE FOR REFERENCE
+
+Test pipeline for preprocessing + RANSAC + find_M2.
+
+This was our first version of the pipeline, where we measured the whole pipeline and calculated
+the performance, including the preprocessing. We quickly realized this was not an accurate 
+measure of performance.
+"""
+
 import sys
 import os
 import numpy as np

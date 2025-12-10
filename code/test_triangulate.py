@@ -1,4 +1,6 @@
-# Sample Main - CUDA vs. CPU Triangulation Benchmark
+"""
+Benchmark for triangulation on different number of points.
+"""
 
 import sys
 import os

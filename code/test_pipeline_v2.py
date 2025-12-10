@@ -1,8 +1,10 @@
 """
-Test pipeline for the correspondence workflow.
+Test pipeline for the correspondence workflow on actual images.
 
 This pipeline gives times for each of the preprocessing steps, and compares the correspondence
-pipeline (ransac + triangulation) of the CPU numpy vs GPU CUDA implementation. 
+pipeline (ransac + triangulation) of the CPU numpy vs GPU CUDA implementation. This is more detailed
+than version 3 because it returns the speedup for overall correspondence pipeline, but also the individual
+RANSAC and find_m2 steps.
 """
 
 import sys
@@ -259,8 +261,25 @@ if __name__ == '__main__':
     
     # Speedup Calculation (Excluding SIFT/Matching)
     if time_gpu_total_ops > 0:
-        speedup = time_cpu_total_ops / time_gpu_total_ops
-        print(f"Optimization Speedup: {speedup:.2f}x")
+        cpu_vs_gpu_warp_speedup = time_cpu_total_ops / time_warp_gpu_total_ops
+        cpu_vs_gpu_block_speedup = time_cpu_total_ops / time_gpu_total_ops
+        gpu_block_vs_gpu_warp_speedup = time_gpu_total_ops / time_warp_gpu_total_ops
+        print(f"Total Speedup (CPU vs. GPU Warp): {cpu_vs_gpu_warp_speedup:.2f}x")
+        print(f"Total Speedup (CPU vs. GPU Block): {cpu_vs_gpu_block_speedup:.2f}x")
+        print(f"Total Speedup (GPU Block vs GPU Warp): {gpu_block_vs_gpu_warp_speedup:.2f}x")
+        
+        ransac_cpu_vs_warp = time_cpu_ransac / time_warp_gpu_ransac
+        ransac_cpu_vs_block = time_cpu_ransac / time_gpu_ransac
+        ransac_block_vs_warp = time_gpu_ransac / time_warp_gpu_ransac
+        print(f"RANSAC Speedup (CPU vs. GPU Warp): {ransac_cpu_vs_warp:.2f}x")
+        print(f"RANSAC Speedup (CPU vs. GPU Block): {ransac_cpu_vs_block:.2f}x")
+        print(f"RANSAC Speedup (GPU Block vs GPU Warp): {ransac_block_vs_warp:.2f}x")
+
+        m2_cpu_vs_warp = time_cpu_m2 / time_warp_gpu_m2
+        m2_cpu_vs_block = time_cpu_m2 / time_gpu_m2
+        print(f"FindM2 Speedup (CPU vs. GPU Warp): {m2_cpu_vs_warp:.2f}x")
+        print(f"FindM2 Speedup (CPU vs. GPU Block): {m2_cpu_vs_block:.2f}x\n\n")
+        
     else:
         print("Optimization Speedup: N/A (GPU Time is 0)")
 
@@ -268,9 +287,10 @@ if __name__ == '__main__':
     compare_matrices_frobenius(F_cpu, F_gpu, "Fundamental Matrix (F)")
     compare_matrices_frobenius(M2_cpu, M2_gpu, "Camera Matrix (M2)")
 
-    if P_cpu is not None and P_gpu is not None:
+    if P_cpu is not None and P_gpu is not None and P_warp_gpu is not None:
         print(f">> CPU Points: {len(P_cpu)}")
-        print(f">> GPU Points: {len(P_gpu)}")
+        print(f">> GPU (Block) Points: {len(P_gpu)}")
+        print(f">> GPU (Warp) Points: {len(P_warp_gpu)}")
         # Check simple centroid distance
         dist = np.linalg.norm(np.mean(P_cpu, axis=0) - np.mean(P_gpu, axis=0))
         print(f">> Point Cloud Centroid Distance: {dist:.4f}")
