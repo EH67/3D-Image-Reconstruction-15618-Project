@@ -76,7 +76,6 @@ def run_ransac_gpu(pts1, pts2, M, num_iters, threshold):
     Executes RANSAC using the CUDA implementation.
     Returns: F, mask (boolean array)
     """
-    # print("RANSAC GPU called for num_iters", num_iters, "threshold", threshold)
     F = cuda_ransac_module.cuda_ransac(pts1, pts2, int(M), num_iters, threshold)
     
     # Compute Mask (Sequential calculation of error)
@@ -86,7 +85,6 @@ def run_ransac_gpu(pts1, pts2, M, num_iters, threshold):
     
     errors = compute_symmetric_epipolar_distance(F, hpts1, hpts2)
     mask = errors < threshold ** 2
-    # print(F)
     
     return F, mask
 
@@ -95,7 +93,6 @@ def run_ransac_warp_gpu(pts1, pts2, M, num_iters, threshold):
     Executes RANSAC using the CUDA Warp implementation.
     Returns: F, mask (boolean array)
     """
-    # print("RANSAC Warp GPU called for num_iters", num_iters, "threshold", threshold)
     F = cuda_ransac_warp_module.cuda_ransac_warp(pts1, pts2, int(M), num_iters, threshold)
     
     # Compute Mask (Sequential calculation of error)
@@ -105,7 +102,6 @@ def run_ransac_warp_gpu(pts1, pts2, M, num_iters, threshold):
     
     errors = compute_symmetric_epipolar_distance(F, hpts1, hpts2)
     mask = errors < threshold ** 2
-    print(F)
     
     return F, mask
 
@@ -121,7 +117,6 @@ def _process_correspondences(img1, img2, M, ransac_func, num_iters, threshold):
     matches = compute_matches(des1, des2)
     pts1_cand, pts2_cand = filter_matches(matches, kp1, kp2)
 
-    # print(f"Found {len(pts1_cand)} raw matches after Ratio Test.")
 
     if len(pts1_cand) < 8:
         print("Not enough matches to compute fundamental matrix (Need >= 8).")
@@ -139,7 +134,7 @@ def _process_correspondences(img1, img2, M, ransac_func, num_iters, threshold):
     pts1_inliers = pts1_cand[mask]
     pts2_inliers = pts2_cand[mask]
 
-    print(f"Inliers: {len(pts1_inliers)} / {len(pts1_cand)}")
+    # print(f"Inliers: {len(pts1_inliers)} / {len(pts1_cand)}")
     
     return pts1_inliers, pts2_inliers, F
 

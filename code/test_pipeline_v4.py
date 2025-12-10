@@ -1,3 +1,12 @@
+"""
+Test pipeline that includes postprocessing.
+
+This is the whole 3D reconstruction pipeline if we were to scale to multiple images. It includes
+the preprocessing, the correspondence pipeline, triangulation, and postprocessing (bundle adjustment
+& scale adjustment). Due to the short project span, we did not get to parallelizing the bundle 
+adjustment portion, so it is serial for now (excluding the vectorization done by numpy).
+"""
+
 import sys
 import os
 import numpy as np

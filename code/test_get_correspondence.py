@@ -114,6 +114,8 @@ if __name__=='__main__':
 
     # --- 2. Run GPU Benchmark ---
     print("Running GPU Implementation...")
+    # Warmup
+    get_correspondences_gpu(im1, im2, M)
     
     start_gpu = time.perf_counter()
     

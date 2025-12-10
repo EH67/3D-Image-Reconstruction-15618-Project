@@ -1,3 +1,10 @@
+"""
+Test pipeline for the correspondence workflow.
+
+This pipeline gives times for each of the preprocessing steps, and compares the correspondence
+pipeline (ransac + triangulation) of the CPU numpy vs GPU CUDA implementation. 
+"""
+
 import sys
 import os
 import numpy as np
@@ -19,7 +26,7 @@ try:
 except ImportError:
     from find_m2 import findM2_cpu, findM2_gpu
 
-EXPORT_OUTPUT = True  # Set to True to save .npz files for Colab plotting
+EXPORT_OUTPUT = False  # Set to True to save .npz files for Colab plotting
 RESIZE = False
 
 def export_visualization_data(filename, img1, img2, pts1, pts2, P):
@@ -87,9 +94,9 @@ if __name__ == '__main__':
     np.random.seed(0)
 
     # --- 1. Load Data ---
-    IMAGE_DIR = os.path.abspath(os.path.join(current_dir, 'images'))
-    IM1_PATH = os.path.join(IMAGE_DIR, 'bag3.jpg')
-    IM2_PATH = os.path.join(IMAGE_DIR, 'bag4.jpg')
+    IMAGE_DIR = os.path.abspath(os.path.join(current_dir, 'images/Pokemon_Plush'))
+    IM1_PATH = os.path.join(IMAGE_DIR, 'PokePlush_09.jpg')
+    IM2_PATH = os.path.join(IMAGE_DIR, 'PokePlush_10.jpg')
 
     im1 = cv2.imread(IM1_PATH)
     im2 = cv2.imread(IM2_PATH)
@@ -181,14 +188,14 @@ if __name__ == '__main__':
     print(f"    - Total Optimization Time: {time_cpu_total_ops:.4f}s")
     print("-" * 60)
 
-    # --- 4. GPU Pipeline (RANSAC + M2) ---
+    # --- 4. GPU Pipeline (RANSAC Block Version + M2) ---
     # Warmup
-    run_ransac_warp_gpu(pts1_cand[:8], pts2_cand[:8], M_scale, num_iters=5, threshold=3.0)
-    print("[GPU] Starting Optimization (RANSAC + FindM2)...")
+    run_ransac_gpu(pts1_cand[:8], pts2_cand[:8], M_scale, num_iters=5, threshold=3.0)
+    print("[GPU] Starting Optimization (RANSAC Block Version + FindM2)...")
     start_gpu = time.perf_counter()
     
     # A. RANSAC
-    F_gpu, mask_gpu = run_ransac_warp_gpu(pts1_cand, pts2_cand, M_scale, num_iters=5000, threshold=3.0)
+    F_gpu, mask_gpu = run_ransac_gpu(pts1_cand, pts2_cand, M_scale, num_iters=5000, threshold=3.0)
     
     # Apply Mask
     mask_gpu = mask_gpu.ravel().astype(bool)
@@ -212,6 +219,39 @@ if __name__ == '__main__':
     print(f"    - RANSAC Time: {time_gpu_ransac:.4f}s")
     print(f"    - FindM2 Time: {time_gpu_m2:.4f}s")
     print(f"    - Total Optimization Time: {time_gpu_total_ops:.4f}s")
+    print("-" * 60)
+
+    # --- 5. GPU Pipeline (RANSAC Warp Version + M2) ---
+    # Warmup
+    run_ransac_warp_gpu(pts1_cand[:8], pts2_cand[:8], M_scale, num_iters=5, threshold=3.0)
+    print("[GPU] Starting Optimization (RANSAC Warp Version + FindM2)...")
+    start_warp_gpu = time.perf_counter()
+    
+    # A. RANSAC
+    F_warp_gpu, mask_warp_gpu = run_ransac_warp_gpu(pts1_cand, pts2_cand, M_scale, num_iters=5000, threshold=3.0)
+    
+    # Apply Mask
+    mask_warp_gpu = mask_warp_gpu.ravel().astype(bool)
+    pts1_warp_gpu_inliers = pts1_cand[mask_warp_gpu]
+    pts2_warp_gpu_inliers = pts2_cand[mask_warp_gpu]
+    
+    t_ransac_warp_gpu = time.perf_counter()
+
+    # B. Find M2 & Triangulate
+    if F_warp_gpu is not None:
+        M2_warp_gpu, C2_warp_gpu, P_warp_gpu = findM2_gpu(F_warp_gpu, pts1_warp_gpu_inliers, pts2_warp_gpu_inliers, intrinsics)
+    else:
+        M2_warp_gpu, P_warp_gpu = None, None
+
+    end_warp_gpu = time.perf_counter()
+    
+    time_warp_gpu_ransac = t_ransac_warp_gpu - start_warp_gpu
+    time_warp_gpu_m2 = end_warp_gpu - t_ransac_warp_gpu
+    time_warp_gpu_total_ops = end_warp_gpu - start_warp_gpu
+
+    print(f"    - RANSAC Warp Time: {time_warp_gpu_ransac:.4f}s")
+    print(f"    - FindM2 Time: {time_warp_gpu_m2:.4f}s")
+    print(f"    - Total Optimization Time: {time_warp_gpu_total_ops:.4f}s")
     print("-" * 60)
 
     # --- 5. Analysis ---

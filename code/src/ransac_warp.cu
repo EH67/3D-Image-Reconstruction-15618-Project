@@ -375,7 +375,7 @@ void cuda_ransac_warp(const std::vector<float> &pts1, const std::vector<float> &
   auto max_iter = std::max_element(inlier_counts.begin(), inlier_counts.end());
   int best_idx = std::distance(inlier_counts.begin(), max_iter);
   int best_count = *max_iter;
-  printf("Max inliers: %d\n", best_count);
+  // printf("Max inliers: %d\n", best_count);
   output_F.reserve(9);
   for (int i = 0 ; i < 9 ; i++) {
     output_F[i] = fund_matrices[best_idx * 9 + i];

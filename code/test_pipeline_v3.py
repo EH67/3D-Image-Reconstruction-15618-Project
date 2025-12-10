@@ -1,3 +1,12 @@
+"""
+Test pipeline for the CPU numpy version, GPU block per iter, and GPU warp per iter.
+
+This extends from pipeline 2 since it compares our original version of having each block
+run 1 iteration of the RANSAC to the optimized version of one warp per iteration. It compares
+the speedup between the CPU and each of the GPU versions, and does a comparison between the two
+GPU versions as well.
+"""
+
 import sys
 import os
 import numpy as np
@@ -16,7 +25,7 @@ sys.path.insert(0, build_dir)
 import cuda_ransac_module
 import cuda_ransac_warp_module
 
-EXPORT_OUTPUT = True
+EXPORT_OUTPUT = False
 RESIZE = False
 
 def export_visualization_data(filename, img1, img2, pts1, pts2, P):
@@ -221,9 +230,12 @@ def run_image_pipeline_comparison():
     print("="*60)
 
     # Load Images
-    IMAGE_DIR = os.path.abspath(os.path.join(current_dir, 'images'))
-    IM1_PATH = os.path.join(IMAGE_DIR, 'bag3.jpg')
-    IM2_PATH = os.path.join(IMAGE_DIR, 'bag4.jpg')
+    # IMAGE_DIR = os.path.abspath(os.path.join(current_dir, 'images'))
+    # IM1_PATH = os.path.join(IMAGE_DIR, 'bag3.jpg')
+    # IM2_PATH = os.path.join(IMAGE_DIR, 'bag4.jpg')
+    IMAGE_DIR = os.path.abspath(os.path.join(current_dir, 'images/Pokemon_Plush'))
+    IM1_PATH = os.path.join(IMAGE_DIR, 'PokePlush_07.jpg')
+    IM2_PATH = os.path.join(IMAGE_DIR, 'PokePlush_08.jpg')
 
     im1 = cv2.imread(IM1_PATH)
     im2 = cv2.imread(IM2_PATH)

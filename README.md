@@ -34,5 +34,5 @@ This step only needs to be done once (unless the CMake is edited, then delete th
 1. Ensure you are in the build/ directory
 2. Compile the CUDA kernel functions and CPP wrapper
     - `make`
-3. Run the python main function.
-    - `../venv/bin/python ../main.py`
+3. Run the python pipelines.
+    - `../venv/bin/python ../test_pipeline_v3.py`

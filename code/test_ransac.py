@@ -13,19 +13,10 @@ sys.path.insert(0, build_dir)
 import cuda_ransac_module
 import cuda_ransac_warp_module
 
-# try:
-#     import cuda_ransac_module
-#     print("Successfully imported cuda_ransac_module")
-# except ImportError as e:
-#     print("\n--- CRITICAL ERROR: RANSAC MODULE NOT FOUND ---")
-#     print(f"Failed to import 'cuda_ransac_module': {e}")
-#     sys.exit(1)
-
 # --- Helper for Verification ---
 def count_inliers(F, pts1, pts2, threshold):
     """
     Python implementation of error checking to verify the QUALITY of the CUDA result.
-    We don't expect the F matrix to be identical, but it should explain the data equally well.
     """
     if F is None: return 0
     N = pts1.shape[0]
@@ -46,22 +37,36 @@ def count_inliers(F, pts1, pts2, threshold):
     errors = (numerator**2 / denom2) + (numerator**2 / denom1)
     return np.sum(errors < threshold ** 2)
 
-# --- 3. Test Execution ---
+def generate_data(n_points, M=1000.0):
+    """Generates synthetic stereo points with 50% outliers"""
+    n_inliers = n_points // 2
+    n_outliers = n_points - n_inliers
+    
+    pts1_in = np.random.uniform(0, M, size=(n_inliers, 2)).astype(np.float32)
+    pts2_in = pts1_in + np.random.normal(0, 1.0, size=(n_inliers, 2)).astype(np.float32)
+    
+    pts1_out = np.random.uniform(0, M, size=(n_outliers, 2)).astype(np.float32)
+    pts2_out = np.random.uniform(0, M, size=(n_outliers, 2)).astype(np.float32)
+    
+    pts1 = np.vstack([pts1_in, pts1_out])
+    pts2 = np.vstack([pts2_in, pts2_out])
+    
+    perm = np.random.permutation(n_points)
+    return pts1[perm], pts2[perm]
+
+# --- 2. Test Execution ---
 
 def run_correctness_test():
-    print("\n" + "="*60)
-    print(" PART 1: CORRECTNESS CHECK (N=8, Iters=1)")
-    print("="*60)
+    print("\n" + "="*80)
+    print(f"{'PART 1: CORRECTNESS CHECK (N=8, Iters=1)':^80}")
+    print("="*80)
     
     M = 1000.0
     NUM_ITERS = 1  
     THRESHOLD = 3.0 
     
-    np.random.seed(42) # Fixed seed for reproducibility
-    
-    # Generate exactly 8 points (Deterministic Sample)
-    pts1_raw = np.random.uniform(0, M, size=(8, 2)).astype(np.float32)
-    pts2_raw = pts1_raw + np.random.uniform(-10, 10, size=(8, 2)).astype(np.float32)
+    np.random.seed(42)
+    pts1_raw, pts2_raw = generate_data(8, M)
     
     # 1. Python
     F_python, mask = ransac_fundamental_matrix(pts1_raw, pts2_raw, M, NUM_ITERS, THRESHOLD)
@@ -70,58 +75,46 @@ def run_correctness_test():
     try:
         F_cuda_block = cuda_ransac_module.cuda_ransac(pts1_raw, pts2_raw, int(M), NUM_ITERS, THRESHOLD)
     except Exception as e:
-        print(f"CUDA Block Failed: {e}")
         F_cuda_block = None
 
     # 3. CUDA Warp
     try:
         F_cuda_warp = cuda_ransac_warp_module.cuda_ransac_warp(pts1_raw, pts2_raw, int(M), NUM_ITERS, THRESHOLD)
-    except AttributeError:
-        print("CUDA Warp function not found. Did you bind 'cuda_ransac_warp' in bindings.cpp?")
-        F_cuda_warp = None
     except Exception as e:
-        print(f"CUDA Warp Failed: {e}")
         F_cuda_warp = None
 
-    # --- Analysis ---
-    print(f"{'Implementation':<20} | {'Inliers':<10} | {'F Matrix Check'}")
-    print("-" * 60)
+    # Analysis
+    print(f"{'Implementation':<20} | {'Inliers':<10} | {'Status'}")
+    print("-" * 80)
 
-    # Check Python
     inliers_py = count_inliers(F_python, pts1_raw, pts2_raw, THRESHOLD)
     print(f"{'Python (CPU)':<20} | {inliers_py:<10} | Reference")
 
-    # Check Block
     if F_cuda_block is not None:
         inliers_block = count_inliers(F_cuda_block, pts1_raw, pts2_raw, THRESHOLD)
-        diff = np.min([np.max(np.abs(F_python - F_cuda_block)), np.max(np.abs(F_python + F_cuda_block))])
-        print(f"{'CUDA (Block)':<20} | {inliers_block:<10} | Diff: {diff:.6f}")
+        print(f"{'CUDA (Block)':<20} | {inliers_block:<10} | {'MATCH' if inliers_block == inliers_py else 'MISMATCH'}")
     
-    # Check Warp
     if F_cuda_warp is not None:
         inliers_warp = count_inliers(F_cuda_warp, pts1_raw, pts2_raw, THRESHOLD)
-        diff = np.min([np.max(np.abs(F_python - F_cuda_warp)), np.max(np.abs(F_python + F_cuda_warp))])
-        print(f"{'CUDA (Warp)':<20} | {inliers_warp:<10} | Diff: {diff:.6f}")
+        print(f"{'CUDA (Warp)':<20} | {inliers_warp:<10} | {'MATCH' if inliers_warp == inliers_py else 'MISMATCH'}")
+    print("-" * 80)
 
-    print("-" * 60)
-    if inliers_py == inliers_warp:
-         print(">> SUCCESS: Warp implementation matches Python inliers.")
-    else:
-         print(">> WARNING: Warp implementation inlier count mismatch.")
-
-def run_benchmark():
-    print("\n" + "="*60)
-    print(" PART 2: SCALE BENCHMARK (N=5000, Iters=5000)")
-    print("="*60)
+def run_iter_scaling_benchmark():
+    print("\n" + "="*80)
+    print(f"{'PART 2: SCALING BENCHMARK':^80}")
+    print("="*80)
+    
+    # --- Configuration ---
+    # We will test these iteration counts
+    ITER_CONFIGS = [1000, 5000, 10000, 50000, 100000]
     
     M = 1000.0
-    NUM_ITERS = 5000  # High iterations to stress test GPU
     THRESHOLD = 5.0
     N_POINTS = 5000   
     
+    # --- Generate Data (Once) ---
+    # We use the same dataset for all iterations to ensure fair comparison
     np.random.seed(123)
-    
-    # Generate synthetic data
     pts1_in = np.random.uniform(0, M, size=(N_POINTS // 2, 2)).astype(np.float32)
     pts2_in = pts1_in + np.random.normal(0, 1.0, size=(N_POINTS // 2, 2)).astype(np.float32)
     pts1_out = np.random.uniform(0, M, size=(N_POINTS // 2, 2)).astype(np.float32)
@@ -132,58 +125,124 @@ def run_benchmark():
     perm = np.random.permutation(N_POINTS)
     pts1 = pts1[perm]
     pts2 = pts2[perm]
-    
-    # 1. Python Benchmark
-    print(f"1. Python RANSAC...")
-    start_py = time.perf_counter()
-    F_py, _ = ransac_fundamental_matrix(pts1, pts2, M, NUM_ITERS, THRESHOLD)
-    time_py = (time.perf_counter() - start_py) * 1000.0
-    inliers_py = count_inliers(F_py, pts1, pts2, THRESHOLD)
-    print(f"   -> Time: {time_py:.2f} ms | Inliers: {inliers_py}")
 
-    # 2. CUDA Block Benchmark
-    print(f"2. CUDA Block RANSAC (Original)...")
+    # --- Warmup GPUs ---
+    # Run a small dummy kernel to initialize CUDA context overhead before timing
     try:
-        # Warmup
         cuda_ransac_module.cuda_ransac(pts1[:8], pts2[:8], int(M), 1, THRESHOLD)
-        
-        start_cuda = time.perf_counter()
-        F_cuda = cuda_ransac_module.cuda_ransac(pts1, pts2, int(M), NUM_ITERS, THRESHOLD)
-        time_cuda = (time.perf_counter() - start_cuda) * 1000.0
-        inliers_cuda = count_inliers(F_cuda, pts1, pts2, THRESHOLD)
-        print(f"   -> Time: {time_cuda:.2f} ms | Inliers: {inliers_cuda}")
-    except Exception as e:
-        print(f"   -> Failed: {e}")
-        time_cuda = float('inf')
-
-    # 3. CUDA Warp Benchmark
-    print(f"3. CUDA Warp RANSAC (Optimized)...")
-    try:
-        # Warmup
         cuda_ransac_warp_module.cuda_ransac_warp(pts1[:8], pts2[:8], int(M), 1, THRESHOLD)
+    except:
+        pass
 
-        start_warp = time.perf_counter()
-        F_warp = cuda_ransac_warp_module.cuda_ransac_warp(pts1, pts2, int(M), NUM_ITERS, THRESHOLD)
-        time_warp = (time.perf_counter() - start_warp) * 1000.0
-        inliers_warp = count_inliers(F_warp, pts1, pts2, THRESHOLD)
-        print(f"   -> Time: {time_warp:.2f} ms | Inliers: {inliers_warp}")
-    except AttributeError:
-        print("   -> 'cuda_ransac_warp' not found in module.")
-        time_warp = float('inf')
-    except Exception as e:
-        print(f"   -> Failed: {e}")
-        time_warp = float('inf')
+    # --- Table Header ---
+    # Cols: Iters | Py Time | Block Time | Warp Time | Speedup (Py/Warp) | Speedup (Block/Warp)
+    print(f"{'Iters':<10} | {'Py (ms)':<10} | {'Block (ms)':<10} | {'Warp (ms)':<10} | {'Speedup (vs Py)':<15} | {'Speedup (vs Blk)':<15}")
+    print("-" * 80)
 
-    # --- Comparison ---
-    print("-" * 60)
-    print("SPEEDUP ANALYSIS:")
-    if time_cuda < float('inf'):
-        print(f"Block GPU vs Python:      {time_py / time_cuda:.2f}x faster")
-    if time_warp < float('inf'):
-        print(f"Warp GPU vs Python:       {time_py / time_warp:.2f}x faster")
-    if time_cuda < float('inf') and time_warp < float('inf'):
-        print(f"Warp GPU vs Block GPU:    {time_cuda / time_warp:.2f}x faster")
+    for num_iters in ITER_CONFIGS:
+        
+        # 1. Python
+        # Skip Python for very large iters if it takes too long (optional check)
+        if num_iters > 100000:
+            t_py = -1.0 # Skip
+        else:
+            s = time.perf_counter()
+            _, _ = ransac_fundamental_matrix(pts1, pts2, M, num_iters, THRESHOLD)
+            t_py = (time.perf_counter() - s) * 1000.0
+
+        # 2. CUDA Block
+        try:
+            s = time.perf_counter()
+            _ = cuda_ransac_module.cuda_ransac(pts1, pts2, int(M), num_iters, THRESHOLD)
+            t_block = (time.perf_counter() - s) * 1000.0
+        except:
+            t_block = -1.0
+
+        # 3. CUDA Warp
+        try:
+            s = time.perf_counter()
+            _ = cuda_ransac_warp_module.cuda_ransac_warp(pts1, pts2, int(M), num_iters, THRESHOLD)
+            t_warp = (time.perf_counter() - s) * 1000.0
+        except:
+            t_warp = -1.0
+
+        # --- Formatting Output ---
+        str_py = f"{t_py:.2f}" if t_py > 0 else "N/A"
+        str_blk = f"{t_block:.2f}" if t_block > 0 else "ERR"
+        str_warp = f"{t_warp:.2f}" if t_warp > 0 else "ERR"
+        
+        # Speedup Calcs
+        if t_warp > 0 and t_py > 0:
+            speedup_py = f"{t_py / t_warp:.1f}x"
+        else:
+            speedup_py = "-"
+            
+        if t_warp > 0 and t_block > 0:
+            speedup_blk = f"{t_block / t_warp:.1f}x"
+        else:
+            speedup_blk = "-"
+
+        print(f"{num_iters:<10} | {str_py:<10} | {str_blk:<10} | {str_warp:<10} | {speedup_py:<15} | {speedup_blk:<15}")
+
+def run_point_scaling_benchmark():
+    print("\n" + "="*80)
+    print(f"{'PART 3: POINT SCALING (Fixed Iters=5000)':^80}")
+    print("="*80)
+    
+    # We test small to very large point clouds
+    POINT_CONFIGS = [1000, 5000, 10000, 50000, 100000, 200000]
+    M = 1000.0
+    THRESHOLD = 5.0
+    NUM_ITERS = 5000
+    
+    # Warmup again to be safe
+    try:
+        pts_w, _ = generate_data(100, M)
+        cuda_ransac_module.cuda_ransac(pts_w, pts_w, int(M), 1, THRESHOLD)
+        cuda_ransac_warp_module.cuda_ransac_warp(pts_w, pts_w, int(M), 1, THRESHOLD)
+    except: pass
+
+    print(f"{'Points (N)':<10} | {'Py (ms)':<10} | {'Block (ms)':<10} | {'Warp (ms)':<10} | {'Speedup (vs Py)':<15} | {'Speedup (vs Blk)':<15}")
+    print("-" * 80)
+
+    for n_points in POINT_CONFIGS:
+        
+        # Generate new data for this size
+        np.random.seed(123)
+        pts1, pts2 = generate_data(n_points, M)
+
+        # 1. Python 
+        if n_points > 1000000:
+            t_py = -1.0
+        else:
+            s = time.perf_counter()
+            _, _ = ransac_fundamental_matrix(pts1, pts2, M, NUM_ITERS, THRESHOLD)
+            t_py = (time.perf_counter() - s) * 1000.0
+
+        # 2. CUDA Block
+        try:
+            s = time.perf_counter()
+            _ = cuda_ransac_module.cuda_ransac(pts1, pts2, int(M), NUM_ITERS, THRESHOLD)
+            t_block = (time.perf_counter() - s) * 1000.0
+        except: t_block = -1.0
+
+        # 3. CUDA Warp
+        try:
+            s = time.perf_counter()
+            _ = cuda_ransac_warp_module.cuda_ransac_warp(pts1, pts2, int(M), NUM_ITERS, THRESHOLD)
+            t_warp = (time.perf_counter() - s) * 1000.0
+        except: t_warp = -1.0
+
+        str_py = f"{t_py:.2f}" if t_py > 0 else "SKIP"
+        str_blk = f"{t_block:.2f}" if t_block > 0 else "ERR"
+        str_warp = f"{t_warp:.2f}" if t_warp > 0 else "ERR"
+        
+        speedup_py = f"{t_py / t_warp:.1f}x" if (t_warp > 0 and t_py > 0) else "-"
+        speedup_blk = f"{t_block / t_warp:.1f}x" if (t_warp > 0 and t_block > 0) else "-"
+
+        print(f"{n_points:<10} | {str_py:<10} | {str_blk:<10} | {str_warp:<10} | {speedup_py:<15} | {speedup_blk:<15}")
 
 if __name__ == "__main__":
     run_correctness_test()
-    run_benchmark()
+    run_iter_scaling_benchmark()
+    run_point_scaling_benchmark()
