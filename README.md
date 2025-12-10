@@ -36,4 +36,4 @@ This step only needs to be done once (unless the CMake is edited, then delete th
 2. Compile the CUDA kernel functions and CPP wrapper
     - `make`
 3. Run the python pipelines.
-    - `../venv/bin/python ../test_pipeline_v3.py`
+    - `../venv/bin/python ../test_pipeline_v4.py`
