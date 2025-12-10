@@ -3,6 +3,7 @@
 ## Relavant Links
 - Project Proposal: https://github.com/EH67/3D-Image-Reconstruction-15618-Project/blob/main/Project_Proposal.md
 - Project Milestone Report: https://github.com/EH67/3D-Image-Reconstruction-15618-Project/blob/main/Milestone_Report.md
+- Final Report: https://github.com/EH67/3D-Image-Reconstruction-15618-Project/blob/main/Final_Report.pdf
 
 ## Setup Instructions (for running on GHC Machines)
 ### Clone the repository

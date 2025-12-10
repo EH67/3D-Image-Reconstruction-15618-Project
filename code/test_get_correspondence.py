@@ -1,3 +1,10 @@
+"""
+Not used often - tests the correspondence pipeline to ensure correctness.
+
+This was used in the process of implementing the pipeline to ensure intermediate steps
+are correct. But this does not yield any useful metrics.
+"""
+
 import sys
 import os
 import numpy as np

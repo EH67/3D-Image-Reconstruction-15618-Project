@@ -1,4 +1,8 @@
-# Contains Serial & Parallel findM2 Algorithm (adapted from CMU's Computer Vision Course).
+""" 
+Contains Serial & Parallel findM2 Algorithm (adapted from CMU's Computer Vision Course).
+
+This calls the triangulation CUDA module to reconstruct the 3D points.
+"""
 
 import sys
 import os

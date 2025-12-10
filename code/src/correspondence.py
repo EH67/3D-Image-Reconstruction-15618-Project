@@ -1,3 +1,23 @@
+"""
+Functions for the preprocessing + correspondence pipeline (CPU, GPU block, and GPU warp version).
+
+Preprocessing: 
+- extract_features
+- compute_matches
+- filter_matches
+
+Correspondence Algorithm (RANSAC):
+- run_ransac_cpu
+- run_ransac_gpu (this is the block version)
+- run_ransac_gpu_warp
+
+Wrapper functions for the whole pipeline:
+- get_correspondences_cpu
+- get_correspondences_gpu
+
+These functions are used within the test pipelines.
+"""
+
 import sys
 import os
 import numpy as np
@@ -144,4 +164,4 @@ def get_correspondences_cpu(img1, img2, M, num_iters=NUM_ITERS, threshold=THRESH
     return _process_correspondences(img1, img2, M, run_ransac_cpu, num_iters, threshold)
 
 def get_correspondences_gpu(img1, img2, M, num_iters=NUM_ITERS, threshold=THRESHOLD):
-    return _process_correspondences(img1, img2, M, run_ransac_gpu, num_iters, threshold)
+    return _process_correspondences(img1, img2, M, run_ransac_gpu_warp, num_iters, threshold)

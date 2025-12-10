@@ -1,3 +1,4 @@
 code/venv/*
 code/build/*
 **/__pycache__/*
+*.gz

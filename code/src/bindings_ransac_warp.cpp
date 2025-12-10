@@ -1,3 +1,10 @@
+/**
+* Bindings library for RANSAC library (WARP Implementation). 
+*
+* This is a wrapper function that handles converting back and forth between
+* Python and C++/CUDA before calling the C++ function. 
+*/
+
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
 #include <vector>

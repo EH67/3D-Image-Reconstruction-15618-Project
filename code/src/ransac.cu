@@ -1,3 +1,7 @@
+/**
+RANSAC Implementation (1 Iteration per Block version).
+*/
+
 #include "ransac.cuh"
 
 #include <cuda_runtime.h>

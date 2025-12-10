@@ -1,4 +1,14 @@
-# Completely Serial RANSAC Algorithm.
+"""
+Python reference implementation for RANSAC using numpy.
+
+This serves as the "Strong Baseline" for our performance benchmarks. 
+While this runs on the CPU, it is not a naive implementation; it utilizes 
+NumPy's vectorized operations (SIMD) and optimized C-backends to perform 
+matrix multiplications and array broadcasting efficiently. 
+
+This ensures that our GPU speedups are meaningful comparisons against 
+standard high-performance tools, rather than unoptimized Python loops.
+"""
 
 import numpy as np
 import scipy

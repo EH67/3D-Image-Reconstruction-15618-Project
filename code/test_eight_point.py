@@ -1,3 +1,10 @@
+"""
+Not used often - tests the eight point algorithm to ensure correctness.
+
+This was used in the process of implement RANSAC to ensure intermediate steps
+are correct. But this does not yield any useful metrics.
+"""
+
 import sys
 import os
 import numpy as np

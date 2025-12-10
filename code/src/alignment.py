@@ -1,3 +1,7 @@
+"""
+Module for all the postprocessing (bundle adjustment, scale adjustment).
+"""
+
 import math
 from scipy.spatial import KDTree
 import scipy.optimize

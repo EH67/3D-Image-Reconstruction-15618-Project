@@ -1,3 +1,13 @@
+/**
+* DEPRECATED - triangulate implementation using cuSOLVER.
+*
+* This was one of our approaches for solving the SVDs. However, it actually was slower
+* than just doing a serial SVD implementation and assign it to 1 GPU thread since the
+* matrices we are working with were really small (3*3, 4*4, 8*9, etc), and it is not worth
+* the global memory accesses and synchronization that cuSOLVER does. More details are given
+* in the final report.
+*/
+
 #include "triangulate.cuh"
 #include <cuda_runtime.h>
 #include <cusolverDn.h>
