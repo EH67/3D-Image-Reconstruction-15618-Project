@@ -13,7 +13,7 @@ parent_dir = os.path.dirname(current_dir)
 build_dir = os.path.join(parent_dir, 'build') # add /build to current abs path.
 sys.path.insert(0, build_dir) # add path with /build to sys path.
 
-# Import any modules defined by PYBIND11_MODULE from src/bindings.cpp.
+
 import cuda_ops_module 
 import cuda_ransac_module
 import cuda_ransac_warp_module
@@ -65,10 +65,10 @@ def run_ransac_cpu(pts1, pts2, M, num_iters, threshold):
     Executes RANSAC using the CPU Python implementation.
     Returns: F, mask (boolean array)
     """
-    print("RANSAC CPU called for num_iters", num_iters, "threshold", threshold)
+    # print("RANSAC CPU called for num_iters", num_iters, "threshold", threshold)
     F, mask = ransac_fundamental_matrix(pts1, pts2, M, num_iters, threshold)
     mask = mask.astype(bool)
-    print(F)
+    # print(F)
     return F, mask
 
 def run_ransac_gpu(pts1, pts2, M, num_iters, threshold):
@@ -76,7 +76,7 @@ def run_ransac_gpu(pts1, pts2, M, num_iters, threshold):
     Executes RANSAC using the CUDA implementation.
     Returns: F, mask (boolean array)
     """
-    print("RANSAC GPU called for num_iters", num_iters, "threshold", threshold)
+    # print("RANSAC GPU called for num_iters", num_iters, "threshold", threshold)
     F = cuda_ransac_module.cuda_ransac(pts1, pts2, int(M), num_iters, threshold)
     
     # Compute Mask (Sequential calculation of error)
@@ -86,7 +86,7 @@ def run_ransac_gpu(pts1, pts2, M, num_iters, threshold):
     
     errors = compute_symmetric_epipolar_distance(F, hpts1, hpts2)
     mask = errors < threshold ** 2
-    print(F)
+    # print(F)
     
     return F, mask
 
@@ -95,7 +95,7 @@ def run_ransac_warp_gpu(pts1, pts2, M, num_iters, threshold):
     Executes RANSAC using the CUDA Warp implementation.
     Returns: F, mask (boolean array)
     """
-    print("RANSAC Warp GPU called for num_iters", num_iters, "threshold", threshold)
+    # print("RANSAC Warp GPU called for num_iters", num_iters, "threshold", threshold)
     F = cuda_ransac_warp_module.cuda_ransac_warp(pts1, pts2, int(M), num_iters, threshold)
     
     # Compute Mask (Sequential calculation of error)
@@ -121,7 +121,7 @@ def _process_correspondences(img1, img2, M, ransac_func, num_iters, threshold):
     matches = compute_matches(des1, des2)
     pts1_cand, pts2_cand = filter_matches(matches, kp1, kp2)
 
-    print(f"Found {len(pts1_cand)} raw matches after Ratio Test.")
+    # print(f"Found {len(pts1_cand)} raw matches after Ratio Test.")
 
     if len(pts1_cand) < 8:
         print("Not enough matches to compute fundamental matrix (Need >= 8).")

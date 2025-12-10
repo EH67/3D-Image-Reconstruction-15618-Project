@@ -187,7 +187,6 @@ __device__ void singularize_3x3(float* F) {
 
 // s_A is [8*9] matrix in shared mem
 __device__ void device_eight_point_minimal(const float* pts1_dev, const float* pts2_dev, const size_t M, float* output_F_dev, float* s_A) {
-  // int tid = threadIdx.x;
 
   float V[81];
 
@@ -267,21 +266,10 @@ __global__ void ransac_warp_kernel(
   __shared__ float s_pts2[WARPS_PER_BLOCK][8 * 2];
   // Fundamental matrix for this block.
   __shared__ float s_F[WARPS_PER_BLOCK][9];
-  // Used for reduction of inliers.
-  // __shared__ int s_block_inliers;
-  // Used during eight point algo.
   __shared__ float s_A[WARPS_PER_BLOCK][72]; // shape 8*9
-
-  // int tid = threadIdx.x;
-  // int bid = blockIdx.x;
     
   if (ITER_IDX >= num_iters) return;
 
-
-  // if (tid == 0) {
-  //   s_block_inliers = 0;
-  // }
- 
   // T0 randomly generates the 8 points for the algo.
   if (LANE_ID == 0) {
     curandState local_state = global_states[ITER_IDX];
@@ -331,9 +319,6 @@ __global__ void ransac_warp_kernel(
   for (int offset = WARP_SIZE / 2; offset > 0; offset /= 2) {
       local_inlier_cnt += __shfl_down_sync(0xFFFFFFFF, local_inlier_cnt, offset);
   }
-  // atomicAdd(&s_block_inliers, local_inlier_cnt); 
-
-  // __syncwarp();
 
   // Write output.
   if (LANE_ID == 0) {

@@ -13,13 +13,10 @@ py::array_t<float> py_cuda_triangulate(
     py::array_t<float, py::array::c_style | py::array::forcecast> C2, 
     py::array_t<float, py::array::c_style | py::array::forcecast> pts2) 
 {
-    // Use fprintf to stderr to ensure it's flushed
-    // fprintf(stderr, "ENTERED py_cuda_triangulate\n");
-    // fflush(stderr);
+
     
     int N = pts1.shape(0);
-    // fprintf(stderr, "N = %d\n", N);
-    // fflush(stderr);
+
     
     if (N == 0) {
         return py::array_t<float>(std::vector<ssize_t>{0, 3});

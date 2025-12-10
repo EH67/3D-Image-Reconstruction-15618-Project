@@ -1,4 +1,4 @@
-# Contains Serial & Parallel findM2 Algorithm.
+# Contains Serial & Parallel findM2 Algorithm (adapted from CMU's Computer Vision Course).
 
 import sys
 import os
