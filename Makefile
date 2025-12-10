@@ -1,7 +1,7 @@
 .PHONY: tar
 
 tar:
-	tar -cvzf submission.tar.gz --exclude='__pycache__' \
+	tar -cvzf submission.tgz --exclude='__pycache__' \
 		code/images/ \
 		code/plotting/ \
 		code/src/ \
