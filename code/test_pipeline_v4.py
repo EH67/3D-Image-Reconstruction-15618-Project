@@ -18,7 +18,7 @@ sys.path.insert(0, build_dir)
 import cuda_ransac_module
 import cuda_ransac_warp_module
 
-EXPORT_OUTPUT = True
+EXPORT_OUTPUT = False
 RESIZE = False
 
 def export_visualization_data(filename, img1, img2, pts1, pts2, P):
