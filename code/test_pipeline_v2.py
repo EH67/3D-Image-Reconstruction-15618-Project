@@ -308,4 +308,7 @@ if __name__ == '__main__':
             export_visualization_data("results_cpu.npz", im1_rgb, im2_rgb, pts1_cpu_inliers, pts2_cpu_inliers, P_cpu)
         
         if P_gpu is not None:
-            export_visualization_data("results_gpu_warp.npz", im1_rgb, im2_rgb, pts1_gpu_inliers, pts2_gpu_inliers, P_gpu)
+            export_visualization_data("results_gpu_warp.npz", im1_rgb, im2_rgb, pts1_warp_gpu_inliers, pts2_warp_gpu_inliers, P_warp_gpu)
+        
+        if P_gpu is not None:
+            export_visualization_data("results_gpu_block.npz", im1_rgb, im2_rgb, pts1_gpu_inliers, pts2_gpu_inliers, P_gpu)
