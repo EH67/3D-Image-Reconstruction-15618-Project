@@ -105,7 +105,7 @@ def run_correctness_test():
 
 def run_iter_scaling_benchmark():
     print("\n" + "="*80)
-    print(f"{'PART 2: SCALING BENCHMARK':^80}")
+    print(f"{'PART 2: ITER SCALING (Fixed Points=5000)':^80}")
     print("="*80)
     
     # --- Configuration ---

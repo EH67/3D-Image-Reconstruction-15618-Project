@@ -19,11 +19,14 @@
 
 
 __device__ float3 load_point(const float* pts, int ind) {
-  float3 p;
-  p.x = pts[ind * 2];
-  p.y = pts[ind * 2 + 1];
-  p.z = 1;
-  return p;
+  // float3 p;
+  // p.x = pts[ind * 2];
+  // p.y = pts[ind * 2 + 1];
+  // p.z = 1;
+  // return p;
+
+  float2 val = ((const float2*)pts)[ind];
+  return make_float3(val.x, val.y, 1.0f);
 }
 
 __device__ int device_compute_symmetric_epipolar_dist(const float* s_F, const float* hpts1_dev, const float* hpts2_dev, int N, float threshold) {
